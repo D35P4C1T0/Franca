@@ -3519,8 +3519,11 @@ public:
         V3_EXITFN v3_exit;
         V3_GETFN v3_get;
 
+        const water::File pluginFile(filename);
+        const bool isBinary = pluginFile.existsAsFile();
+
         // filename is full path to binary
-        if (water::File(filename).existsAsFile())
+        if (isBinary)
         {
             if (! pData->libOpen(filename))
             {
@@ -3552,7 +3555,7 @@ public:
                 binaryfilename += CARLA_OS_SEP_STR;
 
             binaryfilename += "Contents" CARLA_OS_SEP_STR V3_CONTENT_DIR CARLA_OS_SEP_STR;
-            binaryfilename += water::File(filename).getFileNameWithoutExtension();
+            binaryfilename += pluginFile.getFileNameWithoutExtension();
            #ifdef CARLA_OS_WIN
             binaryfilename += ".vst3";
            #else
@@ -3585,6 +3588,18 @@ public:
             pData->engine->setLastError("Not a VST3 plugin");
             return false;
         }
+
+       #if defined(CARLA_OS_LINUX) && defined(RTLD_NODELETE)
+        const water::File contents = isBinary ? pluginFile.getParentDirectory().getParentDirectory()
+                                              : pluginFile.getChildFile("Contents");
+        if (contents.getParentDirectory().getFileName() == "Silens.vst3")
+        {
+            // shortcut: Silens 1.0.0 calls its ONNX API after dlclose, remove once its teardown is fixed.
+            const water::String runtime = contents.getChildFile("Resources/libonnxruntime.so").getFullPathName();
+            if (void* const handle = ::dlopen(runtime.toRawUTF8(), RTLD_NOW | RTLD_NODELETE))
+                ::dlclose(handle);
+        }
+       #endif
 
         // ------------------------------------------------------------------------------------------------------------
         // call entry point
