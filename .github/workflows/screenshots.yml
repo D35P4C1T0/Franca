@@ -1,0 +1,200 @@
+name: screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'source/frontend-rs/qml/**'
+      - 'source/frontend-rs/src/patchbay/**'
+      - '.github/workflows/screenshots.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install build, Qt 6 / Kirigami, Breeze and Xvfb dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel \
+            git \
+            pkgconf \
+            python \
+            rust \
+            clang \
+            qt6-base \
+            qt6-declarative \
+            qt6-svg \
+            qt6-shadertools \
+            kirigami \
+            qqc2-desktop-style \
+            plasma-integration \
+            breeze \
+            breeze-icons \
+            noto-fonts \
+            alsa-lib \
+            liblo \
+            file \
+            libsndfile \
+            libpulse \
+            libx11 \
+            libxcursor \
+            libxext \
+            libxrandr \
+            mesa \
+            xorg-server-xvfb \
+            lsp-plugins-lv2
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+            source/frontend-rs/target
+          key: franca-screenshots-cargo-${{ hashFiles('source/frontend-rs/Cargo.lock') }}
+          restore-keys: |
+            franca-screenshots-cargo-
+
+      - name: Build Carla backend and franca-ui
+        env:
+          QMAKE: /usr/bin/qmake6
+        run: |
+          make -j"$(nproc)" backend
+          make rust-ui
+
+      - name: Generate demo project (.carxp)
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path("source/frontend").resolve()))
+          from carla_backend import (
+              BINARY_NATIVE,
+              CarlaHostDLL,
+              ENGINE_OPTION_OSC_ENABLED,
+              ENGINE_OPTION_PATH_BINARIES,
+              ENGINE_OPTION_PATH_RESOURCES,
+              ENGINE_OPTION_PROCESS_MODE,
+              ENGINE_OPTION_TRANSPORT_MODE,
+              ENGINE_PROCESS_MODE_CONTINUOUS_RACK,
+              ENGINE_TRANSPORT_MODE_INTERNAL,
+              PLUGIN_INTERNAL,
+              PLUGIN_LV2,
+              PLUGIN_OPTIONS_NULL,
+          )
+
+          bin_dir = Path("bin").resolve()
+          host = CarlaHostDLL(str(bin_dir / "libcarla_standalone2.so"), False)
+          host.set_engine_option(ENGINE_OPTION_OSC_ENABLED, 0, "")
+          host.set_engine_option(ENGINE_OPTION_PATH_BINARIES, 0, str(bin_dir))
+          host.set_engine_option(ENGINE_OPTION_PATH_RESOURCES, 0, str(bin_dir / "resources"))
+          host.set_engine_option(ENGINE_OPTION_PROCESS_MODE, ENGINE_PROCESS_MODE_CONTINUOUS_RACK, "")
+          host.set_engine_option(ENGINE_OPTION_TRANSPORT_MODE, ENGINE_TRANSPORT_MODE_INTERNAL, "")
+          assert host.engine_init("Dummy", "Franca"), host.get_last_error()
+
+          lv2_bundle = "/usr/lib/lv2/lsp-plugins.lv2"
+          plugins = [
+              (PLUGIN_LV2, lv2_bundle, "Gate", "http://lsp-plug.in/plugins/lv2/gate_stereo"),
+              (PLUGIN_LV2, lv2_bundle, "Parametric EQ", "http://lsp-plug.in/plugins/lv2/para_equalizer_x16_stereo"),
+              (PLUGIN_LV2, lv2_bundle, "Compressor", "http://lsp-plug.in/plugins/lv2/compressor_stereo"),
+              (PLUGIN_LV2, lv2_bundle, "Limiter", "http://lsp-plug.in/plugins/lv2/limiter_stereo"),
+              (PLUGIN_INTERNAL, "", "Output Gain", "audiogain_s"),
+          ]
+          loaded = 0
+          for ptype, filename, name, label in plugins:
+              if host.add_plugin(BINARY_NATIVE, ptype, filename, name, label, 0, None, PLUGIN_OPTIONS_NULL):
+                  loaded += 1
+              else:
+                  print(f"Warning: could not load {name} ({label}): {host.get_last_error()}")
+
+          assert loaded >= 1, "Failed to load any demo plugins"
+          os.makedirs("/tmp/franca-demo", exist_ok=True)
+          out = "/tmp/franca-demo/voice-chain.carxp"
+          assert host.save_project(out), host.get_last_error()
+          host.engine_close()
+          print(f"Saved {out} with {loaded} plugins")
+          PY
+
+      - name: Capture Breeze Light and Breeze Dark screenshots
+        run: |
+          mkdir -p "$HOME/.config/franca" /tmp/franca-shots
+          cat > "$HOME/.config/franca/settings.json" <<'JSON'
+          {
+            "audio_driver": "Dummy",
+            "process_mode": 2,
+            "transport_mode": 0,
+            "confirm_exit": false,
+            "show_toolbar": true,
+            "show_side_panel": false,
+            "show_meters": false,
+            "show_keyboard": false
+          }
+          JSON
+
+          capture_theme() {
+            local suffix="$1"
+            local scheme="$2"
+            cp "$scheme" "$HOME/.config/kdeglobals"
+            cat >> "$HOME/.config/kdeglobals" <<'INI'
+
+          [Icons]
+          Theme=breeze
+          INI
+            if [ "$suffix" = "dark" ]; then
+              sed -i 's/^Theme=breeze$/Theme=breeze-dark/' "$HOME/.config/kdeglobals"
+            fi
+
+            FRANCA_LIBDIR="$PWD/bin" \
+            FRANCA_SCREENSHOT_DIR="/tmp/franca-shots" \
+            FRANCA_SCREENSHOT_SUFFIX="$suffix" \
+            FRANCA_SCREENSHOT_WIDTH="1180" \
+            FRANCA_SCREENSHOT_HEIGHT="720" \
+            QT_QPA_PLATFORM="xcb" \
+            QT_QPA_PLATFORMTHEME="kde" \
+            QT_QUICK_CONTROLS_STYLE="org.kde.desktop" \
+            LIBGL_ALWAYS_SOFTWARE="1" \
+            timeout 45 xvfb-run -a -s "-screen 0 1280x800x24" \
+              ./bin/franca-ui /tmp/franca-demo/voice-chain.carxp
+          }
+
+          capture_theme light /usr/share/color-schemes/BreezeLight.colors
+          capture_theme dark  /usr/share/color-schemes/BreezeDark.colors
+
+          ls -lh /tmp/franca-shots/
+          cp /tmp/franca-shots/rack-light.png     docs/assets/rack-light.png
+          cp /tmp/franca-shots/rack-dark.png      docs/assets/rack-dark.png
+          cp /tmp/franca-shots/patchbay-light.png docs/assets/patchbay-light.png
+          cp /tmp/franca-shots/patchbay-dark.png  docs/assets/patchbay-dark.png
+          cp /tmp/franca-shots/rack-dark.png      doc/screenshots/rack.png
+          cp /tmp/franca-shots/patchbay-dark.png  doc/screenshots/patchbay.png
+
+      - name: Upload captured screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: franca-screenshots
+          path: /tmp/franca-shots/*.png
+
+      - name: Commit updated screenshots
+        run: |
+          git config --global --add safe.directory "$PWD"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/rack-light.png docs/assets/rack-dark.png \
+                  docs/assets/patchbay-light.png docs/assets/patchbay-dark.png \
+                  doc/screenshots/rack.png doc/screenshots/patchbay.png
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Rack and Patchbay screenshots"
+            git push
+          else
+            echo "No screenshot changes to commit."
+          fi

@@ -4,14 +4,19 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEventLoop>
 #include <QIcon>
+#include <QImage>
+#include <QMetaObject>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QThread>
+#include <QTimer>
 #include <QUrl>
 
 namespace {
@@ -148,6 +153,33 @@ int run_qt_app() {
     if (engine.rootObjects().isEmpty()) {
         g_engine = nullptr;
         return -1;
+    }
+
+    const QString captureDir = qEnvironmentVariable("FRANCA_SCREENSHOT_DIR");
+    if (!captureDir.isEmpty()) {
+        if (auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first())) {
+            const QString suffix = qEnvironmentVariable("FRANCA_SCREENSHOT_SUFFIX");
+            const QString tag = suffix.isEmpty() ? QString() : (QStringLiteral("-") + suffix);
+            const int targetW = qEnvironmentVariableIntValue("FRANCA_SCREENSHOT_WIDTH");
+            const int targetH = qEnvironmentVariableIntValue("FRANCA_SCREENSHOT_HEIGHT");
+            if (targetW > 0 && targetH > 0) {
+                win->resize(targetW, targetH);
+            }
+            QDir().mkpath(captureDir);
+
+            QTimer::singleShot(1600, win, [win, captureDir, tag]() {
+                const QImage rackImg = win->grabWindow();
+                rackImg.save(QDir(captureDir).filePath(QStringLiteral("rack") + tag + QStringLiteral(".png")));
+
+                QMetaObject::invokeMethod(win, "capturePreparePatchbay");
+
+                QTimer::singleShot(1100, win, [win, captureDir, tag]() {
+                    const QImage pbImg = win->grabWindow();
+                    pbImg.save(QDir(captureDir).filePath(QStringLiteral("patchbay") + tag + QStringLiteral(".png")));
+                    QMetaObject::invokeMethod(win, "captureQuit");
+                });
+            });
+        }
     }
 
     const int rc = app.exec();

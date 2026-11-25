@@ -17,6 +17,18 @@ Controls.ApplicationWindow {
 
     property bool forceClose: false
 
+    function capturePreparePatchbay() {
+        mainTabs.currentIndex = 1;
+        ctrl.refresh_patchbay();
+        ctrl.arrange_patchbay();
+        patchbayView.zoomFit();
+    }
+
+    function captureQuit() {
+        mainWindow.forceClose = true;
+        mainWindow.close();
+    }
+
     FrancaController {
         id: ctrl
         onAlert_requested: function(title, message) {
