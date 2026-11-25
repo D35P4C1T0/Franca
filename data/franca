@@ -50,17 +50,9 @@ fi
 
 RUST_BIN="$FRANCA_LIBDIR/franca-ui"
 
-if [ "${FRANCA_LEGACY_UI:-0}" != "1" ] && [ -x "$RUST_BIN" ]; then
-    if [ "${1:-}" = "--gdb" ]; then
-        shift
-        exec gdb --args "$RUST_BIN" "$@"
-    fi
-    exec "$RUST_BIN" "$@"
-fi
-
 if [ "${1:-}" = "--gdb" ]; then
     shift
-    exec gdb --args python3 "$FRANCA_DATADIR/franca" --with-appname="$0" "$@"
+    exec gdb --args "$RUST_BIN" "$@"
 fi
 
-exec python3 "$FRANCA_DATADIR/franca" --with-appname="$0" "$@"
+exec "$RUST_BIN" "$@"

@@ -39,7 +39,7 @@ endif
 all: native
 
 ifeq ($(LINUX),true)
-ifeq (,$(filter true,$(CROSS_COMPILING) $(SKIP_RUST_UI)))
+ifneq ($(CROSS_COMPILING),true)
 all: franca-ui
 endif
 endif
@@ -403,7 +403,7 @@ check-franca: backend discovery
 	PYTHONPATH=source/frontend python3 source/tests/franca-smoke.py
 
 franca-ui:
-	cargo build --release --manifest-path source/frontend-rs/Cargo.toml
+	cargo build --locked --release --manifest-path source/frontend-rs/Cargo.toml
 	install -d bin
 	install -m 755 source/frontend-rs/target/release/franca-ui bin/franca-ui
 
@@ -437,6 +437,7 @@ FRANCA_UI_HELPERS = $(wildcard bin/resources/*-ui bin/resources/zynaddsubfx) \
 
 install_main:
 ifeq ($(HAVE_FRONTEND),true)
+	install -Dm755 bin/franca-ui "$(DESTDIR)$(FRANCA_LIBDIR)/franca-ui"
 	install -d "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(FRANCA_LIBDIR)" "$(DESTDIR)$(FRANCA_DATADIR)/resources/translations"
 	install -d "$(DESTDIR)$(DATADIR)/applications" "$(DESTDIR)$(DATADIR)/mime/packages" \
 		"$(DESTDIR)$(DATADIR)/icons/hicolor/256x256/apps"
@@ -450,9 +451,6 @@ ifeq ($(HAVE_FRONTEND),true)
 	install -m 644 bin/libcarla_standalone2$(LIB_EXT) bin/libcarla_utils$(LIB_EXT) \
 		bin/libcarla_frontend$(LIB_EXT) "$(DESTDIR)$(FRANCA_LIBDIR)/"
 	install -m 755 $(FRANCA_HELPERS) "$(DESTDIR)$(FRANCA_LIBDIR)/"
-ifneq ($(wildcard bin/franca-ui),)
-	install -m 755 bin/franca-ui "$(DESTDIR)$(FRANCA_LIBDIR)/franca-ui"
-endif
 ifneq ($(wildcard bin/jack/libjack.so.0),)
 	install -Dm755 bin/jack/libjack.so.0 "$(DESTDIR)$(FRANCA_LIBDIR)/jack/libjack.so.0"
 endif
@@ -461,7 +459,7 @@ ifneq ($(wildcard bin/styles/*),)
 	install -m 644 bin/styles/* "$(DESTDIR)$(FRANCA_LIBDIR)/styles/"
 endif
 
-	install -m 644 $(FRANCA_PYTHON)/franca $(FRANCA_PYTHON)/*.py "$(DESTDIR)$(FRANCA_DATADIR)/"
+	install -m 644 $(FRANCA_PYTHON)/*.py "$(DESTDIR)$(FRANCA_DATADIR)/"
 	@for module in common patchcanvas utils widgets; do \
 		install -d "$(DESTDIR)$(FRANCA_DATADIR)/$$module" && \
 		install -m 644 "$(FRANCA_PYTHON)/$$module/"*.py "$(DESTDIR)$(FRANCA_DATADIR)/$$module/" || exit 1; \
@@ -477,7 +475,7 @@ endif
 	ln -sfn "$$(realpath -m --relative-to="$(FRANCA_LIBDIR)" "$(FRANCA_DATADIR)/resources")" \
 		"$(DESTDIR)$(FRANCA_LIBDIR)/resources"
 else
-	@echo "Installing Franca requires Qt and PyQt."
+	@echo "Installing Franca's plugin editors requires Qt and PyQt build tools."
 	@false
 endif
 

@@ -1,6 +1,6 @@
 # Build Franca on Arch Linux
 
-Use a C and C++ toolchain, Make, pkg-config, Rust with Cargo, Qt 6 development tools including Qt Declarative, and KDE Kirigami. Plasma Integration supplies the Qt platform theme on KDE Plasma. Install Python and the PyQt6 or PyQt5 build tools for the fallback UI and Python-based plugin editors included by `make install`.
+Use a C and C++ toolchain, Make, pkg-config, Rust with Cargo, Qt 6 development tools including Qt Declarative, and KDE Kirigami. Plasma Integration supplies the Qt platform theme on KDE Plasma. Install Python and the PyQt6 or PyQt5 build tools for the plugin editors included by `make install`.
 
 Run `make features` to check which drivers, plugin formats, and editors will be available. For full Linux hosting support, build with liblo, libmagic, FluidSynth, libsndfile, ALSA, PulseAudio, and the X11 and OpenGL libraries.
 
@@ -33,4 +33,13 @@ make install PREFIX="$HOME/.local"
 "$HOME/.local/bin/franca"
 ```
 
-Set `FRANCA_LEGACY_UI=1` when launching the installed app to use the Python/Qt fallback.
+## Flatpak
+
+Download the `.flatpak` file from [GitHub Releases](https://github.com/D35P4C1T0/Franca/releases) and install it with Flatpak. The bundle uses the KDE 6.10 runtime.
+
+```sh
+flatpak install --user './Franca-<version>-x86_64.flatpak'
+flatpak run io.github.d35p4c1t0.Franca
+```
+
+Use the native build for Wine-bridged plugins. The Flatpak runs inside its own Linux sandbox.

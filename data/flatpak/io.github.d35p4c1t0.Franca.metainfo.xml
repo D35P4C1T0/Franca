@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.d35p4c1t0.Franca</id>
+  <name>Franca</name>
+  <summary>Host audio plugins and route audio and MIDI</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <launchable type="desktop-id">io.github.d35p4c1t0.Franca.desktop</launchable>
+  <description>
+    <p>Franca hosts audio plugins in a rack and connects audio and MIDI devices in a patchbay.</p>
+  </description>
+  <url type="homepage">https://d35p4c1t0.github.io/Franca/</url>
+  <content_rating type="oars-1.1"/>
+</component>

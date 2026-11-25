@@ -1,0 +1,74 @@
+id: io.github.d35p4c1t0.Franca
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: franca
+rename-desktop-file: franca.desktop
+rename-icon: franca
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=home
+  - --filesystem=xdg-run/pipewire-0
+  - --env=PYTHONPATH=/app/lib/python3.13/site-packages
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    PYTHONPATH: /app/lib/python3.13/site-packages
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/man
+  - '*.a'
+  - '*.la'
+modules:
+  - name: liblo
+    sources:
+      - type: archive
+        url: https://github.com/radarsat1/liblo/releases/download/0.36/liblo-0.36.tar.gz
+        sha256: c08d14832e8dcf8f06840405824a4f9611a0cb3daed0198946326c740941c8b6
+  - name: fluidsynth
+    buildsystem: cmake-ninja
+    config-opts:
+      - -Denable-readline=OFF
+    sources:
+      - type: archive
+        url: https://codeload.github.com/FluidSynth/fluidsynth/tar.gz/refs/tags/v2.6.3
+        dest-filename: fluidsynth-2.6.3.tar.gz
+        sha256: c51ebe04c8a445f4a7dd5a86e09a27b5c5af547756574edc52fc61c88ebe8427
+      - type: archive
+        url: https://codeload.github.com/kthohr/gcem/zip/012ae73c6d0a2cb09ffe86475f5c6fba3926e200
+        dest-filename: gcem.zip
+        dest: gcem
+        sha256: 28159274c54e9640354852e172d10d88eb159f4e7f2fea42edbcd20105ed3526
+  - name: pyqt6
+    buildsystem: simple
+    build-commands:
+      - python3 -m pip install --no-index --no-deps --prefix=/app ./*.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/ec/3e/9a015651ec71cea2e2f960c37edeb21623ba96a74956c0827def837f7c6b/pyqt6-6.10.2-cp39-abi3-manylinux_2_34_x86_64.whl
+        sha256: 78e1b3d5763e4cbc84485aef600e0aba5e1932fd263b716f92cd1a40dfa5e924
+      - type: file
+        url: https://files.pythonhosted.org/packages/0e/38/27c3aa3f153fcd83a0765fedf8e44a1136f189a322bcc9c494c5b3793cd7/pyqt6_sip-13.11.0-cp313-cp313-manylinux1_x86_64.manylinux_2_5_x86_64.whl
+        sha256: a75144e8a0bcf9d1a9069011890401748af353749f1de1b6a314b880781edf9d
+  - name: franca
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - make -j"$FLATPAK_BUILDER_N_JOBS" FRONTEND_TYPE=6
+      - make check-franca FRONTEND_TYPE=6
+      - make install PREFIX=/app FRONTEND_TYPE=6
+      - install -Dm644 data/flatpak/io.github.d35p4c1t0.Franca.metainfo.xml /app/share/metainfo/io.github.d35p4c1t0.Franca.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip: [.git, .flatpak-builder, bin, build, build-lv2, dist, source/frontend-rs/target]
