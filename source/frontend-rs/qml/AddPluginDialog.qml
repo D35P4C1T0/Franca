@@ -106,7 +106,7 @@ Controls.ApplicationWindow {
 
     function commitSelection(plugin) {
         if (!plugin) return;
-        controller.add_plugin_by_key(plugin.key, replacePluginId);
+        controller.add_plugin_by_key_with_bridge(plugin.key, replacePluginId, bridgeModeCombo.currentIndex);
         close();
     }
 
@@ -701,11 +701,24 @@ Controls.ApplicationWindow {
         // Footer buttons
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
             Controls.Label {
                 opacity: 0.75
                 text: qsTr("%1 matching plugins").arg((win.queryResult.items || []).length)
             }
             Item { Layout.fillWidth: true }
+            Controls.Label {
+                text: qsTr("Bridge:")
+                opacity: 0.75
+            }
+            Controls.ComboBox {
+                id: bridgeModeCombo
+                implicitWidth: 120
+                model: [qsTr("Auto"), qsTr("Run in Bridge"), qsTr("In-Process")]
+                currentIndex: 0
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: qsTr("Auto bridges crash-prone plugins (e.g. Cardinal); override per plugin here")
+            }
             Controls.Button { text: qsTr("Cancel"); onClicked: win.close() }
             Controls.Button {
                 text: win.replacePluginId >= 0 ? qsTr("Replace Plugin") : qsTr("Add Plugin")

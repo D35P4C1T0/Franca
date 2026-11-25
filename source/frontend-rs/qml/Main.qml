@@ -16,6 +16,10 @@ Controls.ApplicationWindow {
     title: ctrl.window_title
 
     property bool forceClose: false
+    property bool syncGuard: false
+    readonly property bool logsTabActive: ctrl.show_logs && mainTabs.currentIndex === 2
+    readonly property bool rackVisible: !logsTabActive && (ctrl.split_view || mainTabs.currentIndex === 0)
+    readonly property bool patchbayVisible: !logsTabActive && (ctrl.split_view || mainTabs.currentIndex === 1)
 
     function capturePreparePatchbay() {
         mainTabs.currentIndex = 1;
@@ -29,13 +33,65 @@ Controls.ApplicationWindow {
         mainWindow.close();
     }
 
+    Component.onCompleted: {
+        if (ctrl.pending_recovery_json && ctrl.pending_recovery_json.length > 0) {
+            dialogs.openRecovery(ctrl.pending_recovery_json);
+        }
+    }
+
     FrancaController {
         id: ctrl
         onAlert_requested: function(title, message) {
             dialogs.openAlert(title, message);
         }
+        onIpc_ui_action: function(action, payload) {
+            if (action === "view.tab") {
+                if (payload === "rack") mainTabs.currentIndex = 0;
+                else if (payload === "patchbay") mainTabs.currentIndex = ctrl.split_view ? 0 : 1;
+                else if (payload === "logs" && ctrl.show_logs) mainTabs.currentIndex = 2;
+            } else if (action === "canvas.zoom") {
+                if (payload === "fit") patchbayView.zoomFit();
+                else if (payload === "reset") patchbayView.zoomReset();
+                else if (payload === "in") patchbayView.zoomIn();
+                else if (payload === "out") patchbayView.zoomOut();
+                else {
+                    var zv = parseFloat(payload);
+                    if (!isNaN(zv) && zv > 0) {
+                        patchbayView.zoom = Math.max(0.2, Math.min(3.0, zv));
+                        patchbayView.parseScene();
+                    }
+                }
+            } else if (action === "canvas.search") {
+                patchbayView.openSearch();
+                if (payload && payload.length > 0) {
+                    patchbayView.searchQuery = payload;
+                    patchbayView.updateSearchResults();
+                    if (patchbayView.searchSelectedIdx >= 0) {
+                        patchbayView.jumpToSearchMatch(patchbayView.searchSelectedIdx);
+                    }
+                }
+            } else if (action === "canvas.search.close") {
+                patchbayView.closeSearch();
+            }
+        }
         onFocus_patchbay_requested: {
-            mainTabs.currentIndex = 1;
+            if (!ctrl.split_view) {
+                mainTabs.currentIndex = 1;
+            } else if (mainTabs.currentIndex === 2) {
+                mainTabs.currentIndex = 0;
+            }
+        }
+        onSplit_viewChanged: {
+            if (ctrl.split_view && mainTabs.currentIndex === 1) {
+                mainTabs.currentIndex = 0;
+            }
+        }
+        onSelected_patchbay_plugin_idChanged: {
+            if (!mainWindow.syncGuard && ctrl.selected_patchbay_plugin_id >= 0) {
+                mainWindow.syncGuard = true;
+                rackView.focusPlugin(ctrl.selected_patchbay_plugin_id);
+                mainWindow.syncGuard = false;
+            }
         }
         onQuit_signal_received: {
             mainWindow.forceClose = true;
@@ -53,9 +109,9 @@ Controls.ApplicationWindow {
     }
 
     onClosing: function(close) {
-        if (!forceClose && ctrl.confirm_exit && ctrl.plugin_count > 0) {
+        if (!forceClose && (ctrl.project_dirty || (ctrl.confirm_exit && ctrl.plugin_count > 0))) {
             close.accepted = false;
-            dialogs.openConfirmQuit();
+            dialogs.openConfirmQuit(ctrl.project_dirty);
             return;
         }
         pollTimer.stop();
@@ -70,16 +126,18 @@ Controls.ApplicationWindow {
     Shortcut { sequences: [StandardKey.Undo]; enabled: ctrl.can_undo; onActivated: ctrl.undo() }
     Shortcut { sequences: [StandardKey.Redo, "Ctrl+Y"]; enabled: ctrl.can_redo; onActivated: ctrl.redo() }
     Shortcut { sequence: "Ctrl+P"; enabled: ctrl.engine_running; onActivated: addPluginDlg.openForAdd() }
-    Shortcut { sequence: "Ctrl+G"; enabled: ctrl.engine_running && mainTabs.currentIndex === 1; onActivated: { ctrl.arrange_patchbay(); patchbayView.zoomFit(); } }
-    Shortcut { sequences: ["Ctrl+R", "F5"]; enabled: ctrl.engine_running && mainTabs.currentIndex === 1; onActivated: ctrl.refresh_patchbay() }
-    Shortcut { sequences: ["Ctrl++", "Ctrl+="]; enabled: mainTabs.currentIndex === 1; onActivated: patchbayView.zoomIn() }
-    Shortcut { sequence: "Ctrl+-"; enabled: mainTabs.currentIndex === 1; onActivated: patchbayView.zoomOut() }
-    Shortcut { sequence: "Ctrl+1"; enabled: mainTabs.currentIndex === 1; onActivated: patchbayView.zoomReset() }
-    Shortcut { sequence: "Home"; enabled: mainTabs.currentIndex === 1; onActivated: patchbayView.zoomFit() }
-    Shortcut { sequence: "Ctrl+A"; enabled: mainTabs.currentIndex === 1; onActivated: patchbayView.selectAllBoxes() }
+    Shortcut { sequence: "Ctrl+\\"; onActivated: ctrl.set_layout_toggle("split_view", !ctrl.split_view) }
+    Shortcut { sequence: "Ctrl+F"; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.openSearch() }
+    Shortcut { sequence: "Ctrl+G"; enabled: ctrl.engine_running && mainWindow.patchbayVisible; onActivated: { ctrl.arrange_patchbay(); patchbayView.zoomFit(); } }
+    Shortcut { sequences: ["Ctrl+R", "F5"]; enabled: ctrl.engine_running && mainWindow.patchbayVisible; onActivated: ctrl.refresh_patchbay() }
+    Shortcut { sequences: ["Ctrl++", "Ctrl+="]; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.zoomIn() }
+    Shortcut { sequence: "Ctrl+-"; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.zoomOut() }
+    Shortcut { sequence: "Ctrl+1"; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.zoomReset() }
+    Shortcut { sequence: "Home"; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.zoomFit() }
+    Shortcut { sequence: "Ctrl+A"; enabled: mainWindow.patchbayVisible; onActivated: patchbayView.selectAllBoxes() }
     Shortcut {
         sequences: [StandardKey.Delete]
-        enabled: mainTabs.currentIndex === 0 && rackView.selectedPluginId >= 0
+        enabled: mainWindow.rackVisible && !patchbayView.searchOpen && rackView.selectedPluginId >= 0
         onActivated: ctrl.remove_plugin(rackView.selectedPluginId)
     }
     Shortcut { sequences: [StandardKey.Quit]; onActivated: mainWindow.close() }
@@ -157,6 +215,14 @@ Controls.ApplicationWindow {
             Controls.MenuItem { text: qsTr("Arrange"); icon.name: "view-sort-ascending"; onTriggered: { ctrl.arrange_patchbay(); patchbayView.zoomFit(); } }
             Controls.MenuItem { text: qsTr("Refresh"); icon.name: "view-refresh"; onTriggered: ctrl.refresh_patchbay() }
             Controls.MenuSeparator {}
+            Controls.MenuItem {
+                text: qsTr("Side-by-Side Split View")
+                icon.name: "view-split-left-right"
+                checkable: true
+                checked: ctrl.split_view
+                onToggled: ctrl.set_layout_toggle("split_view", checked)
+            }
+            Controls.MenuSeparator {}
             Controls.Menu {
                 title: qsTr("Zoom")
                 Controls.MenuItem { text: qsTr("Auto-Fit"); icon.name: "zoom-fit-best"; onTriggered: patchbayView.zoomFit() }
@@ -199,6 +265,12 @@ Controls.ApplicationWindow {
                 checkable: true
                 checked: ctrl.show_keyboard
                 onToggled: ctrl.set_layout_toggle("show_keyboard", checked)
+            }
+            Controls.MenuItem {
+                text: qsTr("Split View (Rack + Patchbay)")
+                checkable: true
+                checked: ctrl.split_view
+                onToggled: ctrl.set_layout_toggle("split_view", checked)
             }
             Controls.MenuSeparator {}
             Controls.MenuItem {
@@ -251,11 +323,29 @@ Controls.ApplicationWindow {
                 enabled: ctrl.engine_running
                 onClicked: addPluginDlg.openForAdd()
             }
+            Controls.ToolSeparator {}
+            Controls.ToolButton {
+                text: qsTr("Split View")
+                icon.name: "view-split-left-right"
+                checkable: true
+                checked: ctrl.split_view
+                onClicked: ctrl.set_layout_toggle("split_view", !ctrl.split_view)
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: qsTr("Show Rack and Patchbay side-by-side (Ctrl+\\)")
+            }
             Item { Layout.fillWidth: true }
             Controls.Label {
-                visible: ctrl.project_name.length > 0
-                text: ctrl.project_name
-                opacity: 0.7
+                visible: ctrl.autosave_status.length > 0
+                text: ctrl.autosave_status
+                opacity: 0.65
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                Layout.rightMargin: 8
+            }
+            Controls.Label {
+                visible: ctrl.project_name.length > 0 || ctrl.project_dirty
+                text: (ctrl.project_name.length > 0 ? ctrl.project_name : qsTr("Untitled"))
+                    + (ctrl.project_dirty ? " *" : "")
+                opacity: 0.78
                 Layout.rightMargin: 8
             }
         }
@@ -287,8 +377,15 @@ Controls.ApplicationWindow {
                 Controls.TabBar {
                     id: mainTabs
                     Layout.fillWidth: true
-                    Controls.TabButton { text: qsTr("Rack") }
-                    Controls.TabButton { text: qsTr("Patchbay") }
+                    visible: !ctrl.split_view || ctrl.show_logs
+                    Controls.TabButton {
+                        text: ctrl.split_view ? qsTr("Patchbay + Rack") : qsTr("Rack")
+                    }
+                    Controls.TabButton {
+                        text: qsTr("Patchbay")
+                        visible: !ctrl.split_view
+                        width: visible ? implicitWidth : 0
+                    }
                     Controls.TabButton {
                         text: qsTr("Logs")
                         visible: ctrl.show_logs
@@ -296,29 +393,72 @@ Controls.ApplicationWindow {
                     }
                 }
 
-                StackLayout {
+                Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    currentIndex: mainTabs.currentIndex
 
-                    RackView {
-                        id: rackView
-                        controller: ctrl
-                        onOpenAddPlugin: addPluginDlg.openForAdd()
-                        onOpenPluginEdit: function(pid) { pluginEditWin.openForPlugin(pid); }
-                        onOpenRenamePlugin: function(pid, name) { dialogs.openRename(pid, name); }
-                        onOpenReplacePlugin: function(pid) { addPluginDlg.openForReplace(pid); }
-                    }
+                    // Clara-style Dual View: Patchbay on the left (default 65%), Compact Rack on the right (35%)
+                    Controls.SplitView {
+                        id: dualSplit
+                        anchors.fill: parent
+                        orientation: Qt.Horizontal
+                        visible: !mainWindow.logsTabActive
 
-                    PatchbayView {
-                        id: patchbayView
-                        controller: ctrl
-                        onOpenPluginEdit: function(pid) { pluginEditWin.openForPlugin(pid); }
-                        onOpenRenamePlugin: function(pid, name) { dialogs.openRename(pid, name); }
-                        onOpenReplacePlugin: function(pid) { addPluginDlg.openForReplace(pid); }
+                        onResizingChanged: {
+                            if (!resizing && ctrl.split_view && width > 200 && patchbayView.width > 0) {
+                                ctrl.apply_split_view_ratio(patchbayView.width / width);
+                            }
+                        }
+
+                        handle: Rectangle {
+                            implicitWidth: 4
+                            implicitHeight: 4
+                            color: Controls.SplitHandle.pressed || Controls.SplitHandle.hovered
+                                ? Kirigami.Theme.highlightColor
+                                : Qt.alpha(Kirigami.Theme.textColor, 0.10)
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+
+                        PatchbayView {
+                            id: patchbayView
+                            visible: mainWindow.patchbayVisible
+                            Controls.SplitView.preferredWidth: ctrl.split_view
+                                ? Math.round(dualSplit.width * ctrl.split_view_ratio)
+                                : dualSplit.width
+                            Controls.SplitView.minimumWidth: 320
+                            Controls.SplitView.fillWidth: !ctrl.split_view
+                            controller: ctrl
+                            onOpenPluginEdit: function(pid) { pluginEditWin.openForPlugin(pid); }
+                            onOpenRenamePlugin: function(pid, name) { dialogs.openRename(pid, name); }
+                            onOpenReplacePlugin: function(pid) { addPluginDlg.openForReplace(pid); }
+                        }
+
+                        RackView {
+                            id: rackView
+                            visible: mainWindow.rackVisible
+                            splitMode: ctrl.split_view
+                            patchbayView: patchbayView
+                            Controls.SplitView.fillWidth: true
+                            Controls.SplitView.minimumWidth: 260
+                            controller: ctrl
+                            onOpenAddPlugin: addPluginDlg.openForAdd()
+                            onOpenPluginEdit: function(pid) { pluginEditWin.openForPlugin(pid); }
+                            onOpenRenamePlugin: function(pid, name) { dialogs.openRename(pid, name); }
+                            onOpenReplacePlugin: function(pid) { addPluginDlg.openForReplace(pid); }
+                            onPluginSelected: function(pid) {
+                                if (ctrl.split_view && !mainWindow.syncGuard) {
+                                    mainWindow.syncGuard = true;
+                                    ctrl.sync_rack_to_patchbay(pid);
+                                    patchbayView.focusSelected();
+                                    mainWindow.syncGuard = false;
+                                }
+                            }
+                        }
                     }
 
                     LogsTab {
+                        anchors.fill: parent
+                        visible: mainWindow.logsTabActive
                         controller: ctrl
                     }
                 }

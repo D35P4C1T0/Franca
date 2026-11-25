@@ -1,10 +1,54 @@
 #!/bin/sh
+set -eu
 
-export PATH="X-LIBDIR-X/franca:$PATH"
-export FRANCA_LIBDIR="X-LIBDIR-X/franca"
-export FRANCA_DATADIR="X-DATADIR-X/franca"
+SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PREFIX_DIR="$(CDPATH= cd -- "$SELF_DIR/.." && pwd)"
 
-RUST_BIN="X-LIBDIR-X/franca/franca-ui"
+INSTALL_LIBDIR="X-LIBDIR-X"
+INSTALL_DATADIR="X-DATADIR-X"
+
+if [ -z "${FRANCA_LIBDIR:-}" ]; then
+    if [ -d "$INSTALL_LIBDIR/franca" ]; then
+        FRANCA_LIBDIR="$INSTALL_LIBDIR/franca"
+    else
+        FRANCA_LIBDIR="$PREFIX_DIR/lib/franca"
+    fi
+fi
+
+if [ -z "${FRANCA_DATADIR:-}" ]; then
+    if [ -d "$INSTALL_DATADIR/franca" ]; then
+        FRANCA_DATADIR="$INSTALL_DATADIR/franca"
+    else
+        FRANCA_DATADIR="$PREFIX_DIR/share/franca"
+    fi
+fi
+
+export PATH="$FRANCA_LIBDIR:$PATH"
+export FRANCA_LIBDIR
+export FRANCA_DATADIR
+
+if [ "${1:-}" = "msg" ]; then
+    shift
+    if [ -x "$SELF_DIR/francamsg" ]; then
+        exec "$SELF_DIR/francamsg" "$@"
+    fi
+    exec francamsg "$@"
+fi
+
+# Automatically expose PipeWire's JACK compatibility library when PipeWire is running.
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && ls "$XDG_RUNTIME_DIR"/pipewire-* >/dev/null 2>&1; then
+    for pw_dir in /usr/lib/pipewire-0.3/jack /usr/lib64/pipewire-0.3/jack /usr/lib/x86_64-linux-gnu/pipewire-0.3/jack; do
+        if [ -d "$pw_dir" ]; then
+            case ":${LD_LIBRARY_PATH:-}:" in
+                *":$pw_dir:"*) ;;
+                *) LD_LIBRARY_PATH="${pw_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+            esac
+        fi
+    done
+    export LD_LIBRARY_PATH
+fi
+
+RUST_BIN="$FRANCA_LIBDIR/franca-ui"
 
 if [ "${FRANCA_LEGACY_UI:-0}" != "1" ] && [ -x "$RUST_BIN" ]; then
     if [ "${1:-}" = "--gdb" ]; then
@@ -16,7 +60,7 @@ fi
 
 if [ "${1:-}" = "--gdb" ]; then
     shift
-    exec gdb --args python3 "X-DATADIR-X/franca/franca" --with-appname="$0" "$@"
+    exec gdb --args python3 "$FRANCA_DATADIR/franca" --with-appname="$0" "$@"
 fi
 
-exec python3 "X-DATADIR-X/franca/franca" --with-appname="$0" "$@"
+exec python3 "$FRANCA_DATADIR/franca" --with-appname="$0" "$@"

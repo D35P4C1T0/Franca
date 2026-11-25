@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""francamsg — Scriptable IPC client for inspecting and driving a live Franca instance."""
+
+import argparse
+import glob
+import json
+import os
+import socket
+import sys
+import tempfile
+import time
+
+
+PROTOCOL_VERSION = 1
+
+
+def runtime_dir():
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if base and os.path.isdir(base):
+        return base
+    return tempfile.gettempdir()
+
+
+def registry_dir():
+    return os.path.join(runtime_dir(), "franca-instances")
+
+
+def pid_is_alive(pid):
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid_int <= 0:
+        return False
+    try:
+        os.kill(pid_int, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def socket_is_live(sock_path, timeout=0.5):
+    if not sock_path or not os.path.exists(sock_path):
+        return False
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(sock_path)
+        s.sendall(b'{"v":1,"cmd":"ping"}\n')
+        data = b""
+        while b"\n" not in data:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        reply = json.loads(data.decode("utf-8", errors="replace").strip() or "{}")
+        return bool(reply.get("ok"))
+    except Exception:
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def list_instances(prune_stale=True):
+    folder = registry_dir()
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    for path in sorted(glob.glob(os.path.join(folder, "*.json"))):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                entry = json.load(fh)
+        except Exception:
+            continue
+        pid = entry.get("pid", 0)
+        sock = entry.get("socket", "")
+        alive = pid_is_alive(pid) and socket_is_live(sock)
+        if not alive:
+            if prune_stale and not pid_is_alive(pid):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            continue
+        out.append(entry)
+    out.sort(key=lambda e: e.get("started_unix", 0), reverse=True)
+    return out
+
+
+def resolve_socket(explicit_socket=None, instance_key=None):
+    if explicit_socket:
+        return explicit_socket
+    key = instance_key or os.environ.get("FRANCA_INSTANCE_KEY", "").strip()
+    if key:
+        return os.path.join(runtime_dir(), f"franca-{key}.sock")
+    live = list_instances(prune_stale=True)
+    if live:
+        return live[0]["socket"]
+    # Fallback deterministic search in runtime_dir
+    socks = sorted(glob.glob(os.path.join(runtime_dir(), "franca-*.sock")))
+    for s in socks:
+        if socket_is_live(s):
+            return s
+    return None
+
+
+def send_request(sock_path, cmd, args=None, timeout=30.0):
+    payload = json.dumps({"v": PROTOCOL_VERSION, "cmd": cmd, "args": args or {}}) + "\n"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(sock_path)
+        s.sendall(payload.encode("utf-8"))
+        buf = bytearray()
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if b"\n" in chunk:
+                break
+        raw = bytes(buf).decode("utf-8", errors="replace").strip()
+        if not raw:
+            raise RuntimeError("Empty reply from Franca IPC server")
+        return json.loads(raw)
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def parse_typed_value(text):
+    lower = text.strip().lower()
+    if lower in ("true", "on", "yes"):
+        return True
+    if lower in ("false", "off", "no"):
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
+
+
+def emit(data, as_json=False):
+    if as_json or isinstance(data, (dict, list)):
+        print(json.dumps(data, indent=2 if as_json else None))
+    else:
+        print(data)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="francamsg",
+        description="Scriptable IPC client for a running Franca instance.",
+    )
+    parser.add_argument("--instance", help="Target instance key (or FRANCA_INSTANCE_KEY)")
+    parser.add_argument("--socket", help="Explicit Unix socket path")
+    parser.add_argument("-j", "--json", action="store_true", help="Output formatted JSON")
+    parser.add_argument("--timeout", type=float, default=30.0, help="IPC timeout in seconds")
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("instances", help="List running Franca instances")
+    sub.add_parser("ping", help="Check IPC connectivity")
+    sub.add_parser("status", help="Show engine, project, and UI status")
+
+    p_wait = sub.add_parser("wait", help="Wait until instance is ready")
+    p_wait.add_argument("--ready", action="store_true", help="Wait until audio engine is running")
+    p_wait.add_argument("--timeout", dest="wait_timeout", type=float, default=60.0)
+
+    p_rack = sub.add_parser("rack", help="Inspect or mutate rack plugins")
+    rack_sub = p_rack.add_subparsers(dest="rack_cmd", required=True)
+    rack_sub.add_parser("list")
+    p_radd = rack_sub.add_parser("add")
+    p_radd.add_argument("--key", help="Plugin database key")
+    p_radd.add_argument("--label", help="Plugin label (e.g. audiogain_s)")
+    p_radd.add_argument("--name", help="Display name")
+    p_radd.add_argument("--ptype", type=int, default=1, help="PluginType int (default 1 = INTERNAL)")
+    p_radd.add_argument("--filename", default="")
+    p_radd.add_argument("--replace", type=int, default=None)
+    p_radd.add_argument("--bridge", type=int, default=0, choices=[0, 1, 2])
+    p_rrem = rack_sub.add_parser("remove")
+    p_rrem.add_argument("plugin_id", nargs="?", type=int)
+    p_rrem.add_argument("--all", action="store_true")
+    p_ract = rack_sub.add_parser("active")
+    p_ract.add_argument("plugin_id", type=int)
+    p_ract.add_argument("state", choices=["on", "off", "true", "false", "1", "0"])
+    p_rmov = rack_sub.add_parser("move")
+    p_rmov.add_argument("from_id", type=int)
+    p_rmov.add_argument("to_id", type=int)
+    p_rren = rack_sub.add_parser("rename")
+    p_rren.add_argument("plugin_id", type=int)
+    p_rren.add_argument("name")
+    p_rcat = rack_sub.add_parser("category")
+    p_rcat.add_argument("plugin_id", type=int)
+    p_rcat.add_argument("category", type=int)
+
+    p_pb = sub.add_parser("patchbay", help="Inspect or control patchbay")
+    pb_sub = p_pb.add_subparsers(dest="pb_cmd", required=True)
+    pb_sub.add_parser("state")
+    pb_sub.add_parser("refresh")
+    pb_sub.add_parser("arrange")
+    p_pbc = pb_sub.add_parser("connect")
+    p_pbc.add_argument("group_out", type=int)
+    p_pbc.add_argument("port_out", type=int)
+    p_pbc.add_argument("group_in", type=int)
+    p_pbc.add_argument("port_in", type=int)
+    p_pbd = pb_sub.add_parser("disconnect")
+    p_pbd.add_argument("connection_id", type=int)
+    p_pbs = pb_sub.add_parser("select")
+    p_pbs.add_argument("csv", default="", nargs="?")
+    p_pbh = pb_sub.add_parser("hide-unused")
+    p_pbh.add_argument("state", choices=["on", "off", "true", "false", "1", "0"])
+    p_pbm = pb_sub.add_parser("mode")
+    p_pbm.add_argument("mode", choices=["internal", "external", "plugin", "system"])
+
+    p_view = sub.add_parser("view", help="Inspect or toggle layout / split view")
+    view_sub = p_view.add_subparsers(dest="view_cmd", required=True)
+    view_sub.add_parser("get")
+    p_vs = view_sub.add_parser("split")
+    p_vs.add_argument("state", choices=["on", "off", "true", "false", "1", "0"])
+    p_vr = view_sub.add_parser("ratio")
+    p_vr.add_argument("value", type=float)
+    p_vm = view_sub.add_parser("minimap")
+    p_vm.add_argument("dock", choices=["hidden", "top", "bottom", "0", "1", "2"])
+    p_vt = view_sub.add_parser("tab")
+    p_vt.add_argument("tab", choices=["rack", "patchbay", "logs"])
+
+    p_canv = sub.add_parser("canvas", help="Control patchbay canvas viewport & search")
+    canv_sub = p_canv.add_subparsers(dest="canvas_cmd", required=True)
+    p_cz = canv_sub.add_parser("zoom")
+    p_cz.add_argument("value", help="fit, reset, in, out, or float scale")
+    p_cs = canv_sub.add_parser("search")
+    p_cs.add_argument("query", nargs="?", default="")
+    p_cs.add_argument("--close", action="store_true")
+
+    p_set = sub.add_parser("settings", help="Read or update settings live")
+    set_sub = p_set.add_subparsers(dest="set_cmd", required=True)
+    p_sg = set_sub.add_parser("get")
+    p_sg.add_argument("field", nargs="?")
+    p_ss = set_sub.add_parser("set")
+    p_ss.add_argument("field")
+    p_ss.add_argument("value")
+
+    p_proj = sub.add_parser("project", help="Project lifecycle & autosave")
+    proj_sub = p_proj.add_subparsers(dest="proj_cmd", required=True)
+    proj_sub.add_parser("new")
+    p_pl = proj_sub.add_parser("load")
+    p_pl.add_argument("path")
+    p_ps = proj_sub.add_parser("save")
+    p_ps.add_argument("path", nargs="?")
+    proj_sub.add_parser("autosave")
+
+    sub.add_parser("undo", help="Undo last edit")
+    sub.add_parser("redo", help="Redo last undone edit")
+
+    p_shot = sub.add_parser("shot", help="Capture window or patchbay PNG screenshot")
+    p_shot.add_argument("path")
+    p_shot.add_argument("--target", choices=["window", "patchbay"], default="window")
+    p_shot.add_argument("--scale", type=float, default=2.0)
+
+    p_win = sub.add_parser("window", help="Get or set window dimensions")
+    p_win.add_argument("width", nargs="?", type=int)
+    p_win.add_argument("height", nargs="?", type=int)
+
+    p_quit = sub.add_parser("quit", help="Request clean shutdown")
+    p_quit.add_argument("--force", action="store_true")
+
+    p_raw = sub.add_parser("raw", help="Send raw IPC command")
+    p_raw.add_argument("cmd")
+    p_raw.add_argument("args_json", nargs="?", default="{}")
+
+    ns = parser.parse_args(argv)
+
+    if ns.command == "instances":
+        items = list_instances(prune_stale=True)
+        emit(items, as_json=ns.json)
+        return 0
+
+    if ns.command == "wait":
+        deadline = time.monotonic() + ns.wait_timeout
+        while time.monotonic() < deadline:
+            sock = resolve_socket(ns.socket, ns.instance)
+            if sock and socket_is_live(sock, timeout=0.5):
+                if not ns.ready:
+                    emit({"ready": True, "socket": sock}, as_json=ns.json)
+                    return 0
+                try:
+                    reply = send_request(sock, "status", {}, timeout=2.0)
+                    if reply.get("ok") and reply.get("result", {}).get("engine_running"):
+                        emit(reply["result"], as_json=ns.json)
+                        return 0
+                except Exception:
+                    pass
+            time.sleep(0.15)
+        print("Timed out waiting for Franca instance", file=sys.stderr)
+        return 1
+
+    sock = resolve_socket(ns.socket, ns.instance)
+    if not sock:
+        print("No running Franca instance found", file=sys.stderr)
+        return 1
+
+    cmd = None
+    req_args = {}
+
+    if ns.command in ("ping", "status"):
+        cmd = ns.command
+    elif ns.command == "rack":
+        if ns.rack_cmd == "list":
+            cmd = "rack.list"
+        elif ns.rack_cmd == "add":
+            cmd = "rack.add"
+            if ns.key:
+                req_args["key"] = ns.key
+            if ns.label:
+                req_args["label"] = ns.label
+            if ns.name:
+                req_args["name"] = ns.name
+            req_args["ptype"] = ns.ptype
+            req_args["filename"] = ns.filename
+            req_args["bridge_mode"] = ns.bridge
+            if ns.replace is not None:
+                req_args["replace_id"] = ns.replace
+        elif ns.rack_cmd == "remove":
+            cmd = "rack.remove"
+            if ns.all:
+                req_args["all"] = True
+            elif ns.plugin_id is not None:
+                req_args["plugin_id"] = ns.plugin_id
+        elif ns.rack_cmd == "active":
+            cmd = "rack.active"
+            req_args = {"plugin_id": ns.plugin_id, "active": ns.state in ("on", "true", "1")}
+        elif ns.rack_cmd == "move":
+            cmd = "rack.move"
+            req_args = {"from": ns.from_id, "to": ns.to_id}
+        elif ns.rack_cmd == "rename":
+            cmd = "rack.rename"
+            req_args = {"plugin_id": ns.plugin_id, "name": ns.name}
+        elif ns.rack_cmd == "category":
+            cmd = "rack.category"
+            req_args = {"plugin_id": ns.plugin_id, "category": ns.category}
+    elif ns.command == "patchbay":
+        if ns.pb_cmd in ("state", "refresh", "arrange"):
+            cmd = f"patchbay.{ns.pb_cmd}"
+        elif ns.pb_cmd == "connect":
+            cmd = "patchbay.connect"
+            req_args = {
+                "group_out": ns.group_out,
+                "port_out": ns.port_out,
+                "group_in": ns.group_in,
+                "port_in": ns.port_in,
+            }
+        elif ns.pb_cmd == "disconnect":
+            cmd = "patchbay.disconnect"
+            req_args = {"connection_id": ns.connection_id}
+        elif ns.pb_cmd == "select":
+            cmd = "patchbay.select"
+            req_args = {"csv": ns.csv}
+        elif ns.pb_cmd == "hide-unused":
+            cmd = "patchbay.hide_unused"
+            req_args = {"enabled": ns.state in ("on", "true", "1")}
+        elif ns.pb_cmd == "mode":
+            cmd = "patchbay.mode"
+            req_args = {"mode": ns.mode}
+    elif ns.command == "view":
+        if ns.view_cmd == "get":
+            cmd = "view.get"
+        elif ns.view_cmd == "split":
+            cmd = "view.set"
+            req_args = {"split_view": ns.state in ("on", "true", "1")}
+        elif ns.view_cmd == "ratio":
+            cmd = "view.set"
+            req_args = {"split_view_ratio": ns.value}
+        elif ns.view_cmd == "minimap":
+            dock_map = {"hidden": 0, "top": 1, "bottom": 2, "0": 0, "1": 1, "2": 2}
+            cmd = "view.set"
+            req_args = {"split_minimap_dock": dock_map[ns.dock]}
+        elif ns.view_cmd == "tab":
+            cmd = "view.set"
+            req_args = {"tab": ns.tab}
+    elif ns.command == "canvas":
+        if ns.canvas_cmd == "zoom":
+            cmd = "canvas.zoom"
+            req_args = {"mode": ns.value}
+        elif ns.canvas_cmd == "search":
+            cmd = "canvas.search"
+            req_args = {"query": ns.query, "close": ns.close}
+    elif ns.command == "settings":
+        if ns.set_cmd == "get":
+            cmd = "settings.get"
+            if ns.field:
+                req_args = {"field": ns.field}
+        elif ns.set_cmd == "set":
+            cmd = "settings.set"
+            req_args = {"field": ns.field, "value": parse_typed_value(ns.value)}
+    elif ns.command == "project":
+        cmd = f"project.{ns.proj_cmd}"
+        if ns.proj_cmd in ("load", "save") and ns.path:
+            req_args = {"path": os.path.abspath(ns.path)}
+    elif ns.command == "undo":
+        cmd = "history.undo"
+    elif ns.command == "redo":
+        cmd = "history.redo"
+    elif ns.command == "shot":
+        cmd = "shot"
+        req_args = {
+            "path": os.path.abspath(ns.path),
+            "target": ns.target,
+            "scale": ns.scale,
+        }
+    elif ns.command == "window":
+        cmd = "window.geometry"
+        if ns.width is not None and ns.height is not None:
+            req_args = {"width": ns.width, "height": ns.height}
+    elif ns.command == "quit":
+        cmd = "quit"
+        req_args = {"force": bool(ns.force)}
+    elif ns.command == "raw":
+        cmd = ns.cmd
+        req_args = json.loads(ns.args_json)
+
+    try:
+        reply = send_request(sock, cmd, req_args, timeout=ns.timeout)
+    except Exception as exc:
+        print(f"IPC error ({sock}): {exc}", file=sys.stderr)
+        return 1
+
+    if not reply.get("ok"):
+        print(f"Error: {reply.get('error', 'unknown error')}", file=sys.stderr)
+        return 1
+
+    result = reply.get("result")
+    if ns.command == "settings" and ns.set_cmd == "get" and ns.field and not ns.json:
+        emit(result.get("value"), as_json=False)
+    else:
+        emit(result, as_json=ns.json)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

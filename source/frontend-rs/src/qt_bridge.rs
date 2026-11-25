@@ -16,6 +16,9 @@ pub mod qobject {
         #[qml_element]
         #[qproperty(QString, window_title)]
         #[qproperty(QString, project_name)]
+        #[qproperty(bool, project_dirty)]
+        #[qproperty(QString, autosave_status)]
+        #[qproperty(QString, pending_recovery_json)]
         #[qproperty(bool, engine_running)]
         #[qproperty(QString, driver_name)]
         #[qproperty(i32, plugin_count)]
@@ -35,6 +38,10 @@ pub mod qobject {
         #[qproperty(bool, show_side_panel)]
         #[qproperty(bool, show_meters)]
         #[qproperty(bool, show_keyboard)]
+        #[qproperty(bool, split_view)]
+        #[qproperty(f32, split_view_ratio)]
+        #[qproperty(i32, split_minimap_dock)]
+        #[qproperty(bool, hide_unused_ports)]
         #[qproperty(bool, show_logs)]
         #[qproperty(bool, confirm_exit)]
         #[qproperty(bool, experimental_enabled)]
@@ -68,6 +75,8 @@ pub mod qobject {
 
         #[qsignal]
         fn alert_requested(self: Pin<&mut FrancaController>, title: QString, message: QString);
+        #[qsignal]
+        fn ipc_ui_action(self: Pin<&mut FrancaController>, action: QString, payload: QString);
         #[qsignal]
         fn focus_patchbay_requested(self: Pin<&mut FrancaController>);
         #[qsignal]
@@ -103,9 +112,15 @@ pub mod qobject {
         #[qinvokable]
         fn file_save(self: Pin<&mut FrancaController>);
         #[qinvokable]
+        fn file_save_and_check(self: Pin<&mut FrancaController>) -> bool;
+        #[qinvokable]
         fn file_save_as(self: Pin<&mut FrancaController>);
         #[qinvokable]
         fn load_file_url(self: Pin<&mut FrancaController>, path_or_url: QString);
+        #[qinvokable]
+        fn recover_autosave(self: Pin<&mut FrancaController>);
+        #[qinvokable]
+        fn dismiss_recovery(self: Pin<&mut FrancaController>);
 
         // Undo / Redo
         #[qinvokable]
@@ -140,6 +155,8 @@ pub mod qobject {
         fn export_plugin_lv2(self: Pin<&mut FrancaController>, plugin_id: i32);
         #[qinvokable]
         fn find_plugin_in_patchbay(self: Pin<&mut FrancaController>, plugin_id: i32);
+        #[qinvokable]
+        fn sync_rack_to_patchbay(self: Pin<&mut FrancaController>, plugin_id: i32);
 
         // Plugin Macros
         #[qinvokable]
@@ -204,6 +221,13 @@ pub mod qobject {
         #[qinvokable]
         fn add_plugin_by_key(self: Pin<&mut FrancaController>, key: QString, replace_id: i32);
         #[qinvokable]
+        fn add_plugin_by_key_with_bridge(
+            self: Pin<&mut FrancaController>,
+            key: QString,
+            replace_id: i32,
+            bridge_mode: i32,
+        );
+        #[qinvokable]
         fn toggle_favorite(self: Pin<&mut FrancaController>, key: QString);
         #[qinvokable]
         fn start_discovery(self: Pin<&mut FrancaController>, formats_mask: i32, check_invalid: bool);
@@ -252,6 +276,10 @@ pub mod qobject {
         #[qinvokable]
         fn patchbay_cut_line(self: Pin<&mut FrancaController>, x1: f32, y1: f32, x2: f32, y2: f32);
         #[qinvokable]
+        fn apply_hide_unused_ports(self: Pin<&mut FrancaController>, hide: bool);
+        #[qinvokable]
+        fn patchbay_toggle_group_hide_unused(self: Pin<&mut FrancaController>, group_id: i32);
+        #[qinvokable]
         fn save_patchbay_image(self: Pin<&mut FrancaController>, scale: f32);
         #[qinvokable]
         fn copy_patchbay_image(self: Pin<&mut FrancaController>);
@@ -285,6 +313,10 @@ pub mod qobject {
         // Layout Toggles & Settings
         #[qinvokable]
         fn set_layout_toggle(self: Pin<&mut FrancaController>, key: QString, value: bool);
+        #[qinvokable]
+        fn apply_split_view_ratio(self: Pin<&mut FrancaController>, ratio: f32);
+        #[qinvokable]
+        fn apply_split_minimap_dock(self: Pin<&mut FrancaController>, dock: i32);
         #[qinvokable]
         fn load_settings_draft_json(self: &FrancaController) -> QString;
         #[qinvokable]
@@ -352,6 +384,9 @@ pub struct FrancaControllerRust {
     core: FrancaCore,
     window_title: QString,
     project_name: QString,
+    project_dirty: bool,
+    autosave_status: QString,
+    pending_recovery_json: QString,
     engine_running: bool,
     driver_name: QString,
     plugin_count: i32,
@@ -371,6 +406,10 @@ pub struct FrancaControllerRust {
     show_side_panel: bool,
     show_meters: bool,
     show_keyboard: bool,
+    split_view: bool,
+    split_view_ratio: f32,
+    split_minimap_dock: i32,
+    hide_unused_ports: bool,
     show_logs: bool,
     confirm_exit: bool,
     experimental_enabled: bool,
@@ -421,9 +460,18 @@ impl Default for FrancaControllerRust {
             &serde_json::to_string(&core.effective_sample_rates()).unwrap_or_else(|_| "[]".into()),
         );
 
+        let recovery_json = core
+            .pending_recovery
+            .as_ref()
+            .and_then(|r| serde_json::to_string(r).ok())
+            .unwrap_or_default();
+
         Self {
             window_title: title,
             project_name: QString::from(""),
+            project_dirty: core.project_dirty,
+            autosave_status: QString::from(""),
+            pending_recovery_json: QString::from(&recovery_json),
             engine_running: core.engine_running,
             driver_name: driver,
             plugin_count: core.slots.len() as i32,
@@ -443,6 +491,10 @@ impl Default for FrancaControllerRust {
             show_side_panel: core.settings.show_side_panel,
             show_meters: core.settings.show_meters,
             show_keyboard: core.settings.show_keyboard,
+            split_view: core.settings.split_view,
+            split_view_ratio: core.settings.split_view_ratio.clamp(0.25, 0.80),
+            split_minimap_dock: core.settings.split_minimap_dock.clamp(0, 2),
+            hide_unused_ports: core.patchbay.hide_unused_ports,
             show_logs: core.settings.show_logs,
             confirm_exit: core.settings.confirm_exit,
             experimental_enabled: core.settings.experimental,
@@ -481,6 +533,7 @@ impl qobject::FrancaController {
     fn sync_properties(mut self: Pin<&mut Self>) {
         // Take pending signals
         let alerts = std::mem::take(&mut self.as_mut().rust_mut().core.pending.alerts);
+        let ipc_actions = std::mem::take(&mut self.as_mut().rust_mut().core.pending.ipc_ui_actions);
         let focus_pb = std::mem::take(&mut self.as_mut().rust_mut().core.pending.focus_patchbay);
         let quit_req = std::mem::take(&mut self.as_mut().rust_mut().core.pending.quit_requested);
         let rack_dirty = std::mem::take(&mut self.as_mut().rust_mut().core.pending.rack_dirty);
@@ -505,6 +558,32 @@ impl qobject::FrancaController {
         );
         if *self.project_name() != pname {
             self.as_mut().set_project_name(pname);
+        }
+        let dirty = self.rust().core.project_dirty;
+        if *self.project_dirty() != dirty {
+            self.as_mut().set_project_dirty(dirty);
+        }
+        let auto_label = if !self.rust().core.last_autosave_label.is_empty() && dirty {
+            format!("Autosaved {}", self.rust().core.last_autosave_label)
+        } else if dirty {
+            "Unsaved changes".to_string()
+        } else {
+            String::new()
+        };
+        let auto_q = QString::from(&auto_label);
+        if *self.autosave_status() != auto_q {
+            self.as_mut().set_autosave_status(auto_q);
+        }
+        let rec_str = self
+            .rust()
+            .core
+            .pending_recovery
+            .as_ref()
+            .and_then(|r| serde_json::to_string(r).ok())
+            .unwrap_or_default();
+        let rec_q = QString::from(&rec_str);
+        if *self.pending_recovery_json() != rec_q {
+            self.as_mut().set_pending_recovery_json(rec_q);
         }
 
         let running = self.rust().core.engine_running;
@@ -593,6 +672,21 @@ impl qobject::FrancaController {
         }
         if *self.show_keyboard() != s.show_keyboard {
             self.as_mut().set_show_keyboard(s.show_keyboard);
+        }
+        if *self.split_view() != s.split_view {
+            self.as_mut().set_split_view(s.split_view);
+        }
+        let sratio = s.split_view_ratio.clamp(0.25, 0.80);
+        if (*self.split_view_ratio() - sratio).abs() > 0.005 {
+            self.as_mut().set_split_view_ratio(sratio);
+        }
+        let mdock = s.split_minimap_dock.clamp(0, 2);
+        if *self.split_minimap_dock() != mdock {
+            self.as_mut().set_split_minimap_dock(mdock);
+        }
+        let hide_up = self.rust().core.patchbay.hide_unused_ports;
+        if *self.hide_unused_ports() != hide_up {
+            self.as_mut().set_hide_unused_ports(hide_up);
         }
         if *self.show_logs() != s.show_logs {
             self.as_mut().set_show_logs(s.show_logs);
@@ -735,6 +829,10 @@ impl qobject::FrancaController {
             self.as_mut()
                 .alert_requested(QString::from(&t), QString::from(&m));
         }
+        for (act, payload) in ipc_actions {
+            self.as_mut()
+                .ipc_ui_action(QString::from(&act), QString::from(&payload));
+        }
         if focus_pb {
             self.as_mut().focus_patchbay_requested();
         }
@@ -837,12 +935,18 @@ impl qobject::FrancaController {
     }
 
     pub fn file_save(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().core.file_save();
+        let _ = self.as_mut().rust_mut().core.file_save();
         self.sync_properties();
     }
 
+    pub fn file_save_and_check(mut self: Pin<&mut Self>) -> bool {
+        let ok = self.as_mut().rust_mut().core.file_save();
+        self.sync_properties();
+        ok
+    }
+
     pub fn file_save_as(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().core.file_save_as_dialog();
+        let _ = self.as_mut().rust_mut().core.file_save_as_dialog();
         self.sync_properties();
     }
 
@@ -854,6 +958,16 @@ impl qobject::FrancaController {
             .rust_mut()
             .core
             .load_project_or_file(&PathBuf::from(decoded));
+        self.sync_properties();
+    }
+
+    pub fn recover_autosave(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().core.recover_pending_session();
+        self.sync_properties();
+    }
+
+    pub fn dismiss_recovery(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().core.dismiss_pending_recovery();
         self.sync_properties();
     }
 
@@ -1003,12 +1117,29 @@ impl qobject::FrancaController {
                 .get(plugin_id as usize)
                 .map(|s| s.info.name.clone())
                 .unwrap_or_default();
-            if core.external_patchbay {
+            if core.external_patchbay && core.process_mode == ENGINE_PROCESS_MODE_PATCHBAY {
                 core.switch_patchbay_view(false);
             }
             if core.patchbay.focus_plugin(plugin_id as u32, &name) {
+                core.selected_patchbay_plugins = core.patchbay.selected_plugin_ids();
                 core.pending.patchbay_dirty = true;
                 core.pending.focus_patchbay = true;
+            }
+        }
+        self.sync_properties();
+    }
+
+    pub fn sync_rack_to_patchbay(mut self: Pin<&mut Self>, plugin_id: i32) {
+        if plugin_id >= 0 {
+            let core = &mut self.as_mut().rust_mut().core;
+            let name = core
+                .slots
+                .get(plugin_id as usize)
+                .map(|s| s.info.name.clone())
+                .unwrap_or_default();
+            if core.patchbay.focus_plugin(plugin_id as u32, &name) {
+                core.selected_patchbay_plugins = core.patchbay.selected_plugin_ids();
+                core.pending.patchbay_dirty = true;
             }
         }
         self.sync_properties();
@@ -1366,7 +1497,16 @@ impl qobject::FrancaController {
         ))
     }
 
-    pub fn add_plugin_by_key(mut self: Pin<&mut Self>, key: QString, replace_id: i32) {
+    pub fn add_plugin_by_key(self: Pin<&mut Self>, key: QString, replace_id: i32) {
+        self.add_plugin_by_key_with_bridge(key, replace_id, 0);
+    }
+
+    pub fn add_plugin_by_key_with_bridge(
+        mut self: Pin<&mut Self>,
+        key: QString,
+        replace_id: i32,
+        bridge_mode: i32,
+    ) {
         let k = key.to_string();
         let found = self
             .rust()
@@ -1382,7 +1522,10 @@ impl qobject::FrancaController {
             } else {
                 None
             };
-            self.as_mut().rust_mut().core.add_discovered_plugin(&p, rid);
+            self.as_mut()
+                .rust_mut()
+                .core
+                .add_discovered_plugin(&p, rid, bridge_mode);
         }
         self.sync_properties();
     }
@@ -1635,6 +1778,24 @@ impl qobject::FrancaController {
         self.sync_properties();
     }
 
+    pub fn apply_hide_unused_ports(mut self: Pin<&mut Self>, hide: bool) {
+        let core = &mut self.as_mut().rust_mut().core;
+        core.patchbay.hide_unused_ports = hide;
+        core.settings.canvas_hide_unused_ports = hide;
+        let _ = core.settings.save();
+        core.pending.patchbay_dirty = true;
+        self.sync_properties();
+    }
+
+    pub fn patchbay_toggle_group_hide_unused(mut self: Pin<&mut Self>, group_id: i32) {
+        if group_id >= 0 {
+            let core = &mut self.as_mut().rust_mut().core;
+            core.patchbay.toggle_group_hide_unused(group_id as u32);
+            core.pending.patchbay_dirty = true;
+        }
+        self.sync_properties();
+    }
+
     pub fn save_patchbay_image(mut self: Pin<&mut Self>, scale: f32) {
         if let Some(mut path) = rfd::FileDialog::new()
             .set_title("Save Patchbay Image")
@@ -1835,9 +1996,30 @@ impl qobject::FrancaController {
             "show_side_panel" => core.settings.show_side_panel = value,
             "show_meters" => core.settings.show_meters = value,
             "show_keyboard" => core.settings.show_keyboard = value,
+            "split_view" => core.settings.split_view = value,
             _ => {}
         }
         let _ = core.settings.save();
+        self.sync_properties();
+    }
+
+    pub fn apply_split_view_ratio(mut self: Pin<&mut Self>, ratio: f32) {
+        let clamped = ratio.clamp(0.25, 0.80);
+        let core = &mut self.as_mut().rust_mut().core;
+        if (core.settings.split_view_ratio - clamped).abs() > 0.005 {
+            core.settings.split_view_ratio = clamped;
+            let _ = core.settings.save();
+        }
+        self.sync_properties();
+    }
+
+    pub fn apply_split_minimap_dock(mut self: Pin<&mut Self>, dock: i32) {
+        let clamped = dock.clamp(0, 2);
+        let core = &mut self.as_mut().rust_mut().core;
+        if core.settings.split_minimap_dock != clamped {
+            core.settings.split_minimap_dock = clamped;
+            let _ = core.settings.save();
+        }
         self.sync_properties();
     }
 
@@ -1880,6 +2062,7 @@ impl qobject::FrancaController {
                 core.patchbay.canvas_height = core.settings.canvas_height as f32;
                 core.patchbay.use_bezier = core.settings.canvas_use_bezier;
                 core.patchbay.auto_hide_groups = core.settings.canvas_auto_hide_groups;
+                core.patchbay.hide_unused_ports = core.settings.canvas_hide_unused_ports;
                 if let Some(ref host) = core.host {
                     core.settings.apply_to_host(host, &core.bin_dir, &core.res_dir);
                 }

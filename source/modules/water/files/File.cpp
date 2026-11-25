@@ -750,7 +750,8 @@ bool File::replaceWithData (const void* const dataToWrite,
         return deleteFile();
 
     TemporaryFile tempFile (*this, TemporaryFile::useHiddenFile);
-    tempFile.getFile().appendData (dataToWrite, numberOfBytes);
+    if (! tempFile.getFile().appendData (dataToWrite, numberOfBytes))
+        return false;
     return tempFile.overwriteTargetFileWithTemporary();
 }
 

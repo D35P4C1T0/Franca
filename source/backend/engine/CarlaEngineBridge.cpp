@@ -134,6 +134,7 @@ public:
           fIsOffline(false),
           fFirstIdle(true),
           fBridgeVersion(0),
+          fPendingLV2StateRestore(false),
           fLastPingTime(UINT32_MAX)
     {
         carla_debug("CarlaEngineBridge::CarlaEngineBridge(\"%s\", \"%s\", \"%s\", \"%s\")", audioPoolBaseName, rtClientBaseName, nonRtClientBaseName, nonRtServerBaseName);
@@ -906,6 +907,9 @@ public:
             }
 
             case kPluginBridgeNonRtClientSetCustomData: {
+                if (plugin->getType() == PLUGIN_LV2)
+                    fPendingLV2StateRestore = true;
+
                 const uint32_t maxLocalValueLen = fBridgeVersion >= 10 ? 4096 : 16384;
 
                 // type
@@ -924,7 +928,6 @@ public:
                         const BridgeTextReader bigValueFilePathTry(fShmNonRtClientControl);
 
                         CARLA_SAFE_ASSERT_BREAK(bigValueFilePathTry.text[0] != '\0');
-                        if (! plugin->isEnabled()) break;
 
                         water::String bigValueFilePath(bigValueFilePathTry.text);
 
@@ -945,14 +948,12 @@ public:
                     {
                         const BridgeTextReader value(fShmNonRtClientControl, valueSize);
 
-                        if (plugin->isEnabled())
-                            plugin->setCustomData(type.text, key.text, value.text, true);
+                        plugin->setCustomData(type.text, key.text, value.text, true);
                     }
                 }
                 else
                 {
-                    if (plugin->isEnabled())
-                        plugin->setCustomData(type.text, key.text, "", true);
+                    plugin->setCustomData(type.text, key.text, "", true);
                 }
 
                 break;
@@ -1258,6 +1259,13 @@ public:
                 fFirstIdle = true;
                 break;
             }
+        }
+
+        // Apply one state restore after the whole custom-data batch is in.
+        if (fPendingLV2StateRestore && plugin->getType() == PLUGIN_LV2)
+        {
+            fPendingLV2StateRestore = false;
+            plugin->restoreLV2State(false);
         }
     }
 
@@ -1675,6 +1683,7 @@ private:
     bool fIsOffline;
     bool fFirstIdle;
     uint32_t fBridgeVersion;
+    bool fPendingLV2StateRestore;
     uint32_t fLastPingTime;
 
     CARLA_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CarlaEngineBridge)

@@ -42,8 +42,16 @@ Item {
         confirmRemoveAllDialog.open();
     }
 
-    function openConfirmQuit() {
+    function openConfirmQuit(isDirty) {
+        confirmQuitDialog.hasUnsavedChanges = !!isDirty;
         confirmQuitDialog.open();
+    }
+
+    function openRecovery(jsonStr) {
+        try {
+            recoveryDialog.recoveryData = JSON.parse(jsonStr);
+            recoveryDialog.open();
+        } catch (e) {}
     }
 
     // 1. Rename Plugin Dialog
@@ -283,19 +291,103 @@ Item {
         onAccepted: root.controller.remove_all_plugins()
     }
 
-    // 6. Confirm Quit Dialog
+    // 6. Confirm Quit / Unsaved Changes Dialog
     Controls.Dialog {
         id: confirmQuitDialog
-        title: qsTr("Quit Franca")
+        property bool hasUnsavedChanges: false
+        title: hasUnsavedChanges ? qsTr("Unsaved Changes") : qsTr("Quit Franca")
         modal: true
         anchors.centerIn: Controls.Overlay.overlay
-        standardButtons: Controls.Dialog.Yes | Controls.Dialog.Cancel
-        width: 380
-        Controls.Label {
-            width: parent.width
+        width: 420
+
+        contentItem: Controls.Label {
             wrapMode: Text.WordWrap
-            text: qsTr("Plugins are currently loaded. Are you sure you want to exit?")
+            text: confirmQuitDialog.hasUnsavedChanges
+                ? qsTr("Your session has unsaved changes. Would you like to save before exiting?")
+                : qsTr("Plugins are currently loaded. Are you sure you want to exit?")
         }
-        onAccepted: root.quitConfirmed()
+
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                visible: confirmQuitDialog.hasUnsavedChanges
+                text: qsTr("Save & Quit")
+                icon.name: "document-save"
+                highlighted: true
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.AcceptRole
+                onClicked: {
+                    confirmQuitDialog.close();
+                    if (root.controller.file_save_and_check()) {
+                        root.quitConfirmed();
+                    }
+                }
+            }
+            Controls.Button {
+                text: confirmQuitDialog.hasUnsavedChanges ? qsTr("Discard & Quit") : qsTr("Quit")
+                icon.name: "application-exit"
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.DestructiveRole
+                onClicked: {
+                    confirmQuitDialog.close();
+                    root.quitConfirmed();
+                }
+            }
+            Controls.Button {
+                text: qsTr("Cancel")
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.RejectRole
+                onClicked: confirmQuitDialog.close()
+            }
+        }
+    }
+
+    // 7. Startup Autosave Recovery Dialog
+    Controls.Dialog {
+        id: recoveryDialog
+        property var recoveryData: ({ project_display: "", saved_at_display: "", autosave_path: "" })
+        title: qsTr("Recover Previous Session")
+        modal: true
+        anchors.centerIn: Controls.Overlay.overlay
+        width: 440
+
+        contentItem: ColumnLayout {
+            spacing: 8
+            Controls.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: qsTr("Franca did not exit cleanly last time. An autosave snapshot is available:")
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                font.bold: true
+                text: (recoveryDialog.recoveryData.project_display || qsTr("Untitled session"))
+                    + " — " + (recoveryDialog.recoveryData.saved_at_display || "")
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                opacity: 0.72
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                text: qsTr("Recovering restores the snapshot without overwriting your saved project file until you explicitly save.")
+            }
+        }
+
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                text: qsTr("Recover Session")
+                icon.name: "document-revert"
+                highlighted: true
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.AcceptRole
+                onClicked: {
+                    recoveryDialog.close();
+                    root.controller.recover_autosave();
+                }
+            }
+            Controls.Button {
+                text: qsTr("Discard")
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.RejectRole
+                onClicked: {
+                    recoveryDialog.close();
+                    root.controller.dismiss_recovery();
+                }
+            }
+        }
     }
 }

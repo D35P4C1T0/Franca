@@ -4,11 +4,13 @@ mod controller;
 mod discovery;
 mod ffi;
 mod history;
+mod ipc;
 mod logging;
 mod model;
 mod patchbay;
 mod project;
 mod qt_bridge;
+mod session;
 mod settings;
 
 use std::path::PathBuf;

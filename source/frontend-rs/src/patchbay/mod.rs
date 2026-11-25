@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod arrange;
+pub mod rewire;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -206,6 +207,8 @@ pub struct BoxGeomDto {
     pub split: bool,
     pub can_split: bool,
     pub selected: bool,
+    pub hide_unused_ports: bool,
+    pub hidden_port_count: usize,
     pub rect: RectF,
     pub in_ports: Vec<PortGeomDto>,
     pub out_ports: Vec<PortGeomDto>,
@@ -244,7 +247,19 @@ pub struct PatchbayState {
     pub selected_boxes: HashSet<NodeKey>,
     pub auto_hide_groups: bool,
     pub use_bezier: bool,
+    pub hide_unused_ports: bool,
+    pub hidden_unused_groups: HashSet<u32>,
     pub next_auto_pos_index: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct CapturedPluginWiring {
+    pub old_ports: Vec<rewire::RewirePort>,
+    pub connections: Vec<rewire::CapturedConnection>,
+    pub pos1: PointF,
+    pub pos2: PointF,
+    pub split: bool,
+    pub has_custom_pos: bool,
 }
 
 impl Default for PatchbayState {
@@ -264,6 +279,8 @@ impl PatchbayState {
             selected_boxes: HashSet::new(),
             auto_hide_groups: true,
             use_bezier: true,
+            hide_unused_ports: false,
+            hidden_unused_groups: HashSet::new(),
             next_auto_pos_index: 0,
         }
     }
@@ -319,6 +336,20 @@ impl PatchbayState {
         self.connections
             .retain(|c| c.group_out != group_id && c.group_in != group_id);
         self.selected_boxes.retain(|k| k.group_id != group_id);
+        self.hidden_unused_groups.remove(&group_id);
+    }
+
+    pub fn is_group_hiding_unused(&self, group_id: u32) -> bool {
+        self.hide_unused_ports || self.hidden_unused_groups.contains(&group_id)
+    }
+
+    pub fn toggle_group_hide_unused(&mut self, group_id: u32) -> bool {
+        if self.hidden_unused_groups.remove(&group_id) {
+            false
+        } else {
+            self.hidden_unused_groups.insert(group_id);
+            true
+        }
     }
 
     pub fn rename_group(&mut self, group_id: u32, name: String) {
@@ -499,6 +530,8 @@ impl PatchbayState {
         ins: &[&PatchbayPort],
         outs: &[&PatchbayPort],
         can_split: bool,
+        hide_unused_ports: bool,
+        hidden_port_count: usize,
     ) -> BoxGeomDto {
         let max_in_w = ins
             .iter()
@@ -508,7 +541,8 @@ impl PatchbayState {
             .iter()
             .map(|p| Self::estimate_port_text_width(&p.name) + PORT_TEXT_PAD)
             .fold(0.0_f32, f32::max);
-        let title_w = Self::estimate_title_width(&g.name, g.icon);
+        let title_w = Self::estimate_title_width(&g.name, g.icon)
+            + if hidden_port_count > 0 { 48.0 } else { 0.0 };
 
         let ports_w = if !ins.is_empty() && !outs.is_empty() {
             max_in_w + max_out_w + 18.0
@@ -574,6 +608,8 @@ impl PatchbayState {
             split: g.split,
             can_split,
             selected: self.selected_boxes.contains(&key),
+            hide_unused_ports,
+            hidden_port_count,
             rect,
             in_ports,
             out_ports,
@@ -584,36 +620,94 @@ impl PatchbayState {
         let mut boxes = Vec::new();
         let mut anchors: HashMap<(u32, u32, bool), (f32, f32)> = HashMap::new();
 
+        let mut connected_ports: HashSet<(u32, u32, bool)> = HashSet::new();
+        for c in &self.connections {
+            connected_ports.insert((c.group_out, c.port_out, false));
+            connected_ports.insert((c.group_in, c.port_in, true));
+        }
+
         for g in self.groups.values() {
-            let ins: Vec<&PatchbayPort> = self
+            let all_ins: Vec<&PatchbayPort> = self
                 .ports
                 .iter()
                 .filter(|p| p.group_id == g.group_id && p.is_input())
                 .collect();
-            let outs: Vec<&PatchbayPort> = self
+            let all_outs: Vec<&PatchbayPort> = self
                 .ports
                 .iter()
                 .filter(|p| p.group_id == g.group_id && !p.is_input())
                 .collect();
-            let can_split = !ins.is_empty() && !outs.is_empty();
+            let can_split = !all_ins.is_empty() && !all_outs.is_empty();
+            let hide_unused = self.is_group_hiding_unused(g.group_id);
+
+            let (ins, hidden_ins): (Vec<&PatchbayPort>, usize) = if hide_unused {
+                let kept: Vec<&PatchbayPort> = all_ins
+                    .iter()
+                    .copied()
+                    .filter(|p| connected_ports.contains(&(p.group_id, p.port_id, true)))
+                    .collect();
+                let hidden = all_ins.len().saturating_sub(kept.len());
+                (kept, hidden)
+            } else {
+                (all_ins.clone(), 0)
+            };
+
+            let (outs, hidden_outs): (Vec<&PatchbayPort>, usize) = if hide_unused {
+                let kept: Vec<&PatchbayPort> = all_outs
+                    .iter()
+                    .copied()
+                    .filter(|p| connected_ports.contains(&(p.group_id, p.port_id, false)))
+                    .collect();
+                let hidden = all_outs.len().saturating_sub(kept.len());
+                (kept, hidden)
+            } else {
+                (all_outs.clone(), 0)
+            };
 
             if g.split {
-                if !outs.is_empty() || !self.auto_hide_groups {
-                    let b = self.build_box_dto(g, 0, g.pos1, &[], &outs, can_split);
+                if !all_outs.is_empty() || !self.auto_hide_groups {
+                    let b = self.build_box_dto(
+                        g,
+                        0,
+                        g.pos1,
+                        &[],
+                        &outs,
+                        can_split,
+                        hide_unused,
+                        hidden_outs,
+                    );
                     for p in &b.out_ports {
                         anchors.insert((p.group_id, p.port_id, false), (p.anchor_x, p.anchor_y));
                     }
                     boxes.push(b);
                 }
-                if !ins.is_empty() || !self.auto_hide_groups {
-                    let b = self.build_box_dto(g, 1, g.pos2, &ins, &[], can_split);
+                if !all_ins.is_empty() || !self.auto_hide_groups {
+                    let b = self.build_box_dto(
+                        g,
+                        1,
+                        g.pos2,
+                        &ins,
+                        &[],
+                        can_split,
+                        hide_unused,
+                        hidden_ins,
+                    );
                     for p in &b.in_ports {
                         anchors.insert((p.group_id, p.port_id, true), (p.anchor_x, p.anchor_y));
                     }
                     boxes.push(b);
                 }
-            } else if !ins.is_empty() || !outs.is_empty() || !self.auto_hide_groups {
-                let b = self.build_box_dto(g, 0, g.pos1, &ins, &outs, can_split);
+            } else if !all_ins.is_empty() || !all_outs.is_empty() || !self.auto_hide_groups {
+                let b = self.build_box_dto(
+                    g,
+                    0,
+                    g.pos1,
+                    &ins,
+                    &outs,
+                    can_split,
+                    hide_unused,
+                    hidden_ins + hidden_outs,
+                );
                 for p in &b.in_ports {
                     anchors.insert((p.group_id, p.port_id, true), (p.anchor_x, p.anchor_y));
                 }
@@ -822,15 +916,92 @@ impl PatchbayState {
             .map(|c| c.connection_id)
     }
 
-    pub fn focus_plugin(&mut self, plugin_id: u32, fallback_name: &str) -> bool {
+    pub fn find_group_for_plugin(&self, plugin_id: u32, fallback_name: &str) -> Option<u32> {
         let pid = plugin_id as i32;
-        let gid = self
-            .groups
+        self.groups
             .values()
             .find(|g| g.plugin_id == pid)
-            .or_else(|| self.groups.values().find(|g| g.name == fallback_name))
-            .map(|g| g.group_id);
-        let Some(gid) = gid else {
+            .or_else(|| {
+                if fallback_name.is_empty() {
+                    None
+                } else {
+                    self.groups.values().find(|g| g.name == fallback_name)
+                }
+            })
+            .map(|g| g.group_id)
+    }
+
+    pub fn collect_group_rewire_ports(&self, group_id: u32) -> Vec<rewire::RewirePort> {
+        let mut ports: Vec<rewire::RewirePort> = self
+            .ports
+            .iter()
+            .filter(|p| p.group_id == group_id)
+            .map(|p| rewire::RewirePort {
+                port_id: p.port_id,
+                name: p.name.clone(),
+                is_input: p.is_input(),
+                hints: p.hints,
+                role_index: 0,
+            })
+            .collect();
+        rewire::annotate_role_indices(&mut ports);
+        ports
+    }
+
+    pub fn capture_plugin_wiring(
+        &self,
+        plugin_id: u32,
+        fallback_name: &str,
+    ) -> Option<CapturedPluginWiring> {
+        let gid = self.find_group_for_plugin(plugin_id, fallback_name)?;
+        let g = self.groups.get(&gid)?;
+        let old_ports = self.collect_group_rewire_ports(gid);
+        let mut connections = Vec::new();
+
+        for c in &self.connections {
+            if c.group_in == gid && c.group_out != gid {
+                if let (Some(old_port), Some(peer_ep)) = (
+                    old_ports
+                        .iter()
+                        .find(|p| p.port_id == c.port_in && p.is_input),
+                    self.endpoint_for(c.group_out, c.port_out),
+                ) {
+                    connections.push(rewire::CapturedConnection {
+                        old_port: old_port.clone(),
+                        peer_group_name: peer_ep.group_name,
+                        peer_port_name: peer_ep.port_name,
+                        peer_is_input: peer_ep.is_input,
+                    });
+                }
+            } else if c.group_out == gid && c.group_in != gid {
+                if let (Some(old_port), Some(peer_ep)) = (
+                    old_ports
+                        .iter()
+                        .find(|p| p.port_id == c.port_out && !p.is_input),
+                    self.endpoint_for(c.group_in, c.port_in),
+                ) {
+                    connections.push(rewire::CapturedConnection {
+                        old_port: old_port.clone(),
+                        peer_group_name: peer_ep.group_name,
+                        peer_port_name: peer_ep.port_name,
+                        peer_is_input: peer_ep.is_input,
+                    });
+                }
+            }
+        }
+
+        Some(CapturedPluginWiring {
+            old_ports,
+            connections,
+            pos1: g.pos1,
+            pos2: g.pos2,
+            split: g.split,
+            has_custom_pos: g.has_custom_pos,
+        })
+    }
+
+    pub fn focus_plugin(&mut self, plugin_id: u32, fallback_name: &str) -> bool {
+        let Some(gid) = self.find_group_for_plugin(plugin_id, fallback_name) else {
             return false;
         };
         let scene = self.build_scene_dto();
@@ -1079,5 +1250,29 @@ mod tests {
             assert!(p.rect.w < 110.0, "port tag too wide: {}", p.rect.w);
             assert!((p.rect.right() - b.rect.right()).abs() < 0.01);
         }
+    }
+
+    #[test]
+    fn hide_unused_ports_keeps_connected_ports_and_counts_hidden() {
+        let mut pb = PatchbayState::default();
+        pb.add_group(1, 0, 1, "Comp".into());
+        pb.add_port(1, 1, PATCHBAY_PORT_IS_INPUT | PATCHBAY_PORT_TYPE_AUDIO, "In L".into());
+        pb.add_port(1, 2, PATCHBAY_PORT_IS_INPUT | PATCHBAY_PORT_TYPE_AUDIO, "In R".into());
+        pb.add_port(1, 3, PATCHBAY_PORT_IS_INPUT | PATCHBAY_PORT_TYPE_AUDIO, "Sidechain L".into());
+        pb.add_port(1, 4, PATCHBAY_PORT_TYPE_AUDIO, "Out L".into());
+        pb.add_port(1, 5, PATCHBAY_PORT_TYPE_AUDIO, "Out R".into());
+
+        pb.add_group(2, -1, 2, "System".into());
+        pb.add_port(2, 10, PATCHBAY_PORT_TYPE_AUDIO, "capture_1".into());
+        pb.add_connection(100, 2, 10, 1, 1);
+
+        pb.hide_unused_ports = true;
+        let scene = pb.build_scene_dto();
+        let comp = scene.boxes.iter().find(|b| b.group_id == 1).unwrap();
+        assert_eq!(comp.in_ports.len(), 1);
+        assert_eq!(comp.in_ports[0].name, "In L");
+        assert_eq!(comp.out_ports.len(), 0);
+        assert_eq!(comp.hidden_port_count, 4);
+        assert!(comp.hide_unused_ports);
     }
 }

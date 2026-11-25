@@ -33,11 +33,91 @@ ColumnLayout {
     property var dragSourcePort: null
     property var hoverPort: null
 
+    // Quick node search (Ctrl+F)
+    property bool searchOpen: false
+    property string searchQuery: ""
+    property var searchResults: []
+    property int searchSelectedIdx: 0
+
     signal openPluginEdit(int pluginId)
     signal openRenamePlugin(int pluginId, string currentName)
     signal openReplacePlugin(int pluginId)
 
     spacing: 0
+
+    function openSearch() {
+        searchOpen = true;
+        searchQuery = "";
+        updateSearchResults();
+        nodeSearchField.forceActiveFocus();
+        nodeSearchField.selectAll();
+    }
+
+    function closeSearch() {
+        searchOpen = false;
+        searchQuery = "";
+        searchResults = [];
+        searchSelectedIdx = 0;
+    }
+
+    function updateSearchResults() {
+        var boxes = sceneData ? (sceneData.boxes || []) : [];
+        var q = searchQuery.trim().toLowerCase();
+        var terms = q.length > 0 ? q.split(/\s+/) : [];
+        var matches = [];
+        for (var i = 0; i < boxes.length; i++) {
+            var b = boxes[i];
+            var titleLower = (b.title || "").toLowerCase();
+            var matchedPort = "";
+            var allPorts = (b.in_ports || []).concat(b.out_ports || []);
+            var hay = titleLower;
+            for (var p = 0; p < allPorts.length; p++) {
+                hay += " " + (allPorts[p].name || "").toLowerCase();
+            }
+            var ok = true;
+            for (var t = 0; t < terms.length; t++) {
+                if (hay.indexOf(terms[t]) < 0) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) continue;
+            if (terms.length > 0 && titleLower.indexOf(terms[0]) < 0) {
+                for (var p2 = 0; p2 < allPorts.length; p2++) {
+                    if ((allPorts[p2].name || "").toLowerCase().indexOf(terms[0]) >= 0) {
+                        matchedPort = allPorts[p2].name;
+                        break;
+                    }
+                }
+            }
+            var score = (q.length > 0 && titleLower.indexOf(q) === 0) ? 0
+                : ((q.length > 0 && titleLower.indexOf(q) >= 0) ? 1 : 2);
+            matches.push({
+                box: b,
+                title: b.title || "",
+                matchedPort: matchedPort,
+                score: score,
+                splitSuffix: b.split ? (b.split_part === 1 ? " (In)" : " (Out)") : ""
+            });
+        }
+        matches.sort(function(a, b) {
+            if (a.score !== b.score) return a.score - b.score;
+            return a.title.toLowerCase().localeCompare(b.title.toLowerCase());
+        });
+        searchResults = matches;
+        searchSelectedIdx = matches.length > 0 ? 0 : -1;
+    }
+
+    function jumpToSearchMatch(idx) {
+        if (idx < 0 || idx >= searchResults.length) return;
+        var b = searchResults[idx].box;
+        if (!b) return;
+        controller.patchbay_select_boxes(b.group_id + ":" + b.split_part);
+        if (zoom < 0.85) zoom = 0.95;
+        panX = b.rect.x + b.rect.w * 0.5;
+        panY = b.rect.y + b.rect.h * 0.5;
+        pbCanvas.requestPaint();
+    }
 
     function parseScene() {
         try {
@@ -45,6 +125,9 @@ ColumnLayout {
             if (needsInitialFit && sceneData.boxes && sceneData.boxes.length > 0 && pbCanvas.width > 50) {
                 zoomFit();
                 needsInitialFit = false;
+            }
+            if (searchOpen) {
+                updateSearchResults();
             }
             pbCanvas.requestPaint();
         } catch (e) {}
@@ -312,6 +395,28 @@ ColumnLayout {
                 Controls.ToolTip.text: qsTr("Zoom In (Ctrl++)")
             }
 
+            Controls.ToolSeparator {}
+
+            Controls.ToolButton {
+                text: qsTr("Hide Unused")
+                icon.name: "view-filter"
+                checkable: true
+                checked: root.controller.hide_unused_ports
+                onClicked: root.controller.apply_hide_unused_ports(!root.controller.hide_unused_ports)
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: qsTr("Hide unconnected ports on patchbay nodes")
+            }
+
+            Controls.ToolButton {
+                text: qsTr("Find")
+                icon.name: "edit-find"
+                checkable: true
+                checked: root.searchOpen
+                onClicked: root.searchOpen ? root.closeSearch() : root.openSearch()
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: qsTr("Quick search nodes and ports (Ctrl+F)")
+            }
+
             Item { Layout.fillWidth: true }
         }
     }
@@ -449,9 +554,12 @@ ColumnLayout {
                     // Header title
                     if (z >= 0.25) {
                         var prefix = b.icon === 2 ? "◈ " : (b.icon === 3 ? "◆ " : (b.icon === 1 ? "▪ " : ""));
+                        var suffix = (b.hidden_port_count && b.hidden_port_count > 0)
+                            ? (" (+" + b.hidden_port_count + ")")
+                            : "";
                         ctx.fillStyle = Kirigami.Theme.textColor;
                         ctx.font = hdrFont;
-                        drawFittedText(ctx, prefix + b.title, bx + bw * 0.5, by + hdrH * 0.5, bw - 12.0, "center");
+                        drawFittedText(ctx, prefix + b.title + suffix, bx + bw * 0.5, by + hdrH * 0.5, bw - 12.0, "center");
                     }
 
                     // Input ports
@@ -806,6 +914,124 @@ ColumnLayout {
                     pbCanvas.requestPaint();
                 }
             }
+
+            // Floating Quick Node Search Overlay (Ctrl+F)
+            Rectangle {
+                id: searchOverlay
+                visible: root.searchOpen
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 10
+                anchors.rightMargin: 10
+                width: Math.min(340, parent.width - 20)
+                height: searchCol.implicitHeight + 16
+                radius: 6
+                z: 40
+                color: Kirigami.Theme.backgroundColor
+                border.width: 1
+                border.color: Kirigami.Theme.highlightColor
+
+                ColumnLayout {
+                    id: searchCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 8
+                    spacing: 6
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        Controls.TextField {
+                            id: nodeSearchField
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Find node or port…")
+                            text: root.searchQuery
+                            onTextEdited: {
+                                root.searchQuery = text;
+                                root.updateSearchResults();
+                                if (root.searchSelectedIdx >= 0) {
+                                    root.jumpToSearchMatch(root.searchSelectedIdx);
+                                }
+                            }
+                            Keys.onEscapePressed: root.closeSearch()
+                            Keys.onDownPressed: {
+                                if (root.searchResults.length > 0) {
+                                    root.searchSelectedIdx = (root.searchSelectedIdx + 1) % root.searchResults.length;
+                                    root.jumpToSearchMatch(root.searchSelectedIdx);
+                                }
+                            }
+                            Keys.onUpPressed: {
+                                if (root.searchResults.length > 0) {
+                                    root.searchSelectedIdx = (root.searchSelectedIdx - 1 + root.searchResults.length) % root.searchResults.length;
+                                    root.jumpToSearchMatch(root.searchSelectedIdx);
+                                }
+                            }
+                            Keys.onReturnPressed: {
+                                if (root.searchSelectedIdx >= 0) {
+                                    root.jumpToSearchMatch(root.searchSelectedIdx);
+                                }
+                                root.closeSearch();
+                            }
+                            Keys.onEnterPressed: {
+                                if (root.searchSelectedIdx >= 0) {
+                                    root.jumpToSearchMatch(root.searchSelectedIdx);
+                                }
+                                root.closeSearch();
+                            }
+                        }
+                        Controls.ToolButton {
+                            icon.name: "dialog-close"
+                            onClicked: root.closeSearch()
+                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.text: qsTr("Close (Esc)")
+                        }
+                    }
+
+                    Controls.Label {
+                        visible: root.searchResults.length === 0
+                        text: qsTr("No matching nodes")
+                        opacity: 0.65
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    }
+
+                    ListView {
+                        visible: root.searchResults.length > 0
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(220, root.searchResults.length * 28)
+                        clip: true
+                        model: root.searchResults
+                        currentIndex: root.searchSelectedIdx
+
+                        delegate: Controls.ItemDelegate {
+                            required property var modelData
+                            required property int index
+                            width: ListView.view.width
+                            height: 28
+                            highlighted: index === root.searchSelectedIdx
+                            contentItem: RowLayout {
+                                spacing: 6
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    text: modelData.title + modelData.splitSuffix
+                                }
+                                Controls.Label {
+                                    visible: modelData.matchedPort.length > 0
+                                    text: modelData.matchedPort
+                                    opacity: 0.65
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
+                            }
+                            onClicked: {
+                                root.searchSelectedIdx = index;
+                                root.jumpToSearchMatch(index);
+                                root.closeSearch();
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Optional vertical Peak Meters panel (Settings -> Show Patchbay Peak Meters)
@@ -904,6 +1130,13 @@ ColumnLayout {
                     root.controller.patchbay_split_group(boxCtxMenu.targetBox.group_id);
                 }
             }
+        }
+        Controls.MenuItem {
+            text: (boxCtxMenu.targetBox && boxCtxMenu.targetBox.hide_unused_ports)
+                ? qsTr("Show All Ports")
+                : qsTr("Hide Unused Ports")
+            enabled: boxCtxMenu.targetBox && !root.controller.hide_unused_ports
+            onTriggered: root.controller.patchbay_toggle_group_hide_unused(boxCtxMenu.targetBox.group_id)
         }
         Controls.MenuItem {
             text: qsTr("Disconnect All")

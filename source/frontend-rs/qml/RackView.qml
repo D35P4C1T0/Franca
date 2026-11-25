@@ -8,10 +8,22 @@ import org.kde.kirigami as Kirigami
 Item {
     id: root
     required property var controller
+    property bool splitMode: false
+    property var patchbayView: null
+    readonly property bool compactMode: width < 520
+    readonly property int meterWidth: compactMode ? Math.min(46, Math.round(width / 8)) : 62
     property var rackItems: []
     property var meterItems: []
     property var categories: []
     property int selectedPluginId: -1
+
+    TextMetrics {
+        id: unavailableLabel
+        text: qsTr("Unavailable")
+        font.family: Kirigami.Theme.smallFont.family
+        font.pointSize: Kirigami.Theme.smallFont.pointSize
+        font.bold: true
+    }
 
     // Drag-to-reorder state
     property int dragSourceIdx: -1
@@ -49,6 +61,26 @@ Item {
     signal openPluginEdit(int pluginId)
     signal openRenamePlugin(int pluginId, string currentName)
     signal openReplacePlugin(int pluginId)
+    signal pluginSelected(int pluginId)
+
+    function focusPlugin(pid) {
+        if (pid < 0) return;
+        selectedPluginId = pid;
+        for (var i = 0; i < rackItems.length; i++) {
+            if (rackItems[i].plugin_id === pid) {
+                var rowY = i * 41;
+                var viewH = rackList.height;
+                var maxY = Math.max(0, rackList.contentHeight - viewH);
+                var targetY = Math.max(0, Math.min(maxY, rowY - (viewH - 41) * 0.5));
+                if (rowY < rackList.contentY || rowY + 41 > rackList.contentY + viewH) {
+                    smoothScrollAnim.stop();
+                    smoothScrollAnim.to = targetY;
+                    smoothScrollAnim.start();
+                }
+                break;
+            }
+        }
+    }
 
     function parseRack() {
         try { rackItems = JSON.parse(controller.rack_json); } catch (e) { rackItems = []; }
@@ -75,29 +107,106 @@ Item {
         function onMeters_jsonChanged() { root.parseMeters(); }
     }
 
-    // Empty state placeholder
-    Kirigami.PlaceholderMessage {
-        anchors.centerIn: parent
-        width: parent.width - 48
-        visible: root.rackItems.length === 0
-        text: qsTr("No plugins loaded in the rack")
-        explanation: qsTr("Add audio or MIDI plugins to start processing.")
-        icon.name: "audio-card"
-        helpfulAction: Kirigami.Action {
-            text: qsTr("Add Plugin…")
-            icon.name: "list-add"
-            enabled: root.controller.engine_running
-            onTriggered: root.openAddPlugin()
-        }
+    NumberAnimation {
+        id: smoothScrollAnim
+        target: rackList
+        property: "contentY"
+        duration: 180
+        easing.type: Easing.OutCubic
     }
 
-    Controls.ScrollView {
+    ColumnLayout {
         anchors.fill: parent
-        visible: root.rackItems.length > 0
-        clip: true
+        spacing: 0
 
-        ListView {
-            id: rackList
+        // Compact pane header when docked in Split View
+        Controls.ToolBar {
+            visible: root.splitMode
+            Layout.fillWidth: true
+            RowLayout {
+                anchors.fill: parent
+                spacing: 4
+                Controls.Label {
+                    Layout.leftMargin: 6
+                    font.bold: true
+                    text: root.rackItems.length === 1
+                        ? qsTr("Rack (1)")
+                        : qsTr("Rack (%1)").arg(root.rackItems.length)
+                }
+                Item { Layout.fillWidth: true }
+                Controls.ToolButton {
+                    icon.name: "list-add"
+                    enabled: root.controller.engine_running
+                    onClicked: root.openAddPlugin()
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.text: qsTr("Add Plugin (Ctrl+P)")
+                }
+                Controls.ToolButton {
+                    icon.name: "view-preview"
+                    checkable: true
+                    checked: root.controller.split_minimap_dock !== 0
+                    onClicked: {
+                        var next = root.controller.split_minimap_dock === 0 ? 2 : 0;
+                        root.controller.apply_split_minimap_dock(next);
+                    }
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.text: root.controller.split_minimap_dock === 0
+                        ? qsTr("Show docked patchbay minimap")
+                        : qsTr("Hide docked patchbay minimap")
+                }
+            }
+        }
+
+        // Optional top-docked Patchbay Minimap in Split View
+        Minimap {
+            visible: root.splitMode && root.patchbayView !== null && root.controller.split_minimap_dock === 1
+            Layout.fillWidth: true
+            Layout.preferredHeight: 120
+            Layout.margins: 4
+            showDockControls: true
+            dockMode: 1
+            sceneData: root.patchbayView ? root.patchbayView.sceneData : ({ canvas_width: 3100, canvas_height: 2400, boxes: [], connections: [] })
+            panX: root.patchbayView ? root.patchbayView.panX : 1550
+            panY: root.patchbayView ? root.patchbayView.panY : 1200
+            zoom: root.patchbayView ? root.patchbayView.zoom : 1.0
+            viewportW: root.patchbayView ? root.patchbayView.canvasViewportW : 800
+            viewportH: root.patchbayView ? root.patchbayView.canvasViewportH : 600
+            onPanRequested: function(sx, sy) {
+                if (root.patchbayView) {
+                    root.patchbayView.panX = sx;
+                    root.patchbayView.panY = sy;
+                }
+            }
+            onDockModeRequested: function(mode) { root.controller.apply_split_minimap_dock(mode); }
+        }
+
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            // Empty state placeholder
+            Kirigami.PlaceholderMessage {
+                anchors.centerIn: parent
+                width: parent.width - 32
+                visible: root.rackItems.length === 0
+                text: qsTr("No plugins loaded in the rack")
+                explanation: qsTr("Add audio or MIDI plugins to start processing.")
+                icon.name: "audio-card"
+                helpfulAction: Kirigami.Action {
+                    text: qsTr("Add Plugin…")
+                    icon.name: "list-add"
+                    enabled: root.controller.engine_running
+                    onTriggered: root.openAddPlugin()
+                }
+            }
+
+            Controls.ScrollView {
+                anchors.fill: parent
+                visible: root.rackItems.length > 0
+                clip: true
+
+                ListView {
+                    id: rackList
             model: root.rackItems
             spacing: 1
             clip: true
@@ -209,6 +318,7 @@ Item {
                     }
                     onClicked: function(mouse) {
                         root.selectedPluginId = rowItem.pid;
+                        root.pluginSelected(rowItem.pid);
                         if (mouse.button === Qt.RightButton) {
                             ctxMenu.openFor(rowItem.modelData, rowItem.index);
                         }
@@ -222,13 +332,13 @@ Item {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 11
-                    anchors.rightMargin: 8
-                    spacing: 6
+                    anchors.leftMargin: root.compactMode ? 8 : 11
+                    anchors.rightMargin: root.compactMode ? 6 : 8
+                    spacing: root.compactMode ? 2 : 6
 
                     // 1. Drag handle (immediate drag on press)
                     Item {
-                        Layout.preferredWidth: 20
+                        Layout.preferredWidth: root.compactMode ? 16 : 20
                         Layout.fillHeight: true
 
                         Controls.Label {
@@ -283,18 +393,21 @@ Item {
                         Controls.ToolTip.text: rowItem.modelData.active ? qsTr("Bypass effect") : qsTr("Enable effect")
                     }
 
-                    // 3. Fixed 220px elided Plugin Name column
+                    // 3. Plugin Name column (shrink before the controls and meters)
                     Controls.Label {
+                        Layout.fillWidth: true
                         Layout.preferredWidth: 220
-                        Layout.minimumWidth: 220
-                        Layout.maximumWidth: 220
+                        Layout.minimumWidth: 0
+                        Layout.maximumWidth: root.compactMode ? 9999 : 220
                         text: rowItem.modelData.name
                         elide: Text.ElideRight
                         font.bold: rowItem.isSelected
-                        color: rowItem.isActive ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
-                        opacity: rowItem.isActive ? 1.0 : 0.72
+                        color: rowItem.isUnavailable ? Kirigami.Theme.negativeTextColor
+                            : (rowItem.isActive ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor)
+                        opacity: rowItem.isActive || rowItem.isUnavailable ? 1.0 : 0.72
                         Controls.ToolTip.visible: nameHover.containsMouse
-                        Controls.ToolTip.text: rowItem.modelData.name
+                        Controls.ToolTip.text: rowItem.modelData.name + " [" + rowItem.modelData.format + "]"
+                            + (rowItem.isUnavailable ? "\n" + rowItem.modelData.unavailable_error : "")
                         MouseArea {
                             id: nameHover
                             anchors.fill: parent
@@ -334,14 +447,19 @@ Item {
                         Controls.ToolTip.text: qsTr("Plugin actions")
                     }
 
-                    // Flexible spacer
-                    Item { Layout.fillWidth: true }
+                    // Flexible spacer (full width mode only; in compact mode the name column fills)
+                    Item {
+                        visible: !root.compactMode
+                        Layout.fillWidth: !root.compactMode
+                    }
 
-                    // 5. Format / Unavailable label
+                    // 5. Format / Unavailable label (shown in the name tooltip when compact)
                     Controls.Label {
-                        Layout.preferredWidth: 82
+                        visible: !root.compactMode
+                        Layout.preferredWidth: Math.max(82, Math.ceil(unavailableLabel.advanceWidth))
                         horizontalAlignment: Text.AlignRight
-                        text: rowItem.isUnavailable ? qsTr("Unavailable") : rowItem.modelData.format
+                        elide: Text.ElideRight
+                        text: rowItem.isUnavailable ? unavailableLabel.text : rowItem.modelData.format
                         color: rowItem.isUnavailable ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
                         opacity: (rowItem.isActive || rowItem.isUnavailable) ? 1.0 : 0.55
                         font.bold: rowItem.isUnavailable
@@ -367,7 +485,7 @@ Item {
                         spacing: 3
                         opacity: rowItem.isActive ? 1.0 : 0.35
                         PeakMeter {
-                            Layout.preferredWidth: 62
+                            Layout.preferredWidth: root.meterWidth
                             Layout.preferredHeight: 12
                             channels: rowItem.modelData.in_channels || 0
                             baseColor: "#4ADE80"
@@ -378,7 +496,7 @@ Item {
                             tooltipText: qsTr("Input level")
                         }
                         PeakMeter {
-                            Layout.preferredWidth: 62
+                            Layout.preferredWidth: root.meterWidth
                             Layout.preferredHeight: 12
                             channels: rowItem.modelData.out_channels || 0
                             baseColor: "#38BDF8"
@@ -391,6 +509,31 @@ Item {
                     }
                 }
             }
+        }
+            }
+        }
+
+        // Optional bottom-docked Patchbay Minimap in Split View
+        Minimap {
+            visible: root.splitMode && root.patchbayView !== null && root.controller.split_minimap_dock === 2
+            Layout.fillWidth: true
+            Layout.preferredHeight: 120
+            Layout.margins: 4
+            showDockControls: true
+            dockMode: 2
+            sceneData: root.patchbayView ? root.patchbayView.sceneData : ({ canvas_width: 3100, canvas_height: 2400, boxes: [], connections: [] })
+            panX: root.patchbayView ? root.patchbayView.panX : 1550
+            panY: root.patchbayView ? root.patchbayView.panY : 1200
+            zoom: root.patchbayView ? root.patchbayView.zoom : 1.0
+            viewportW: root.patchbayView ? root.patchbayView.canvasViewportW : 800
+            viewportH: root.patchbayView ? root.patchbayView.canvasViewportH : 600
+            onPanRequested: function(sx, sy) {
+                if (root.patchbayView) {
+                    root.patchbayView.panX = sx;
+                    root.patchbayView.panY = sy;
+                }
+            }
+            onDockModeRequested: function(mode) { root.controller.apply_split_minimap_dock(mode); }
         }
     }
 

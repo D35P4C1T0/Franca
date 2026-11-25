@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
+#include <QFileInfo>
 #include <QIcon>
 #include <QImage>
 #include <QMetaObject>
@@ -113,6 +114,70 @@ void franca_qt_process_events() {
         return;
     }
     QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+}
+
+bool franca_qt_grab_window(const char* output_path, int* out_width, int* out_height) {
+    if (!on_gui_thread() || g_engine == nullptr || output_path == nullptr || output_path[0] == '\0') {
+        return false;
+    }
+    const auto roots = g_engine->rootObjects();
+    if (roots.isEmpty()) {
+        return false;
+    }
+    auto* win = qobject_cast<QQuickWindow*>(roots.first());
+    if (win == nullptr) {
+        return false;
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 40);
+    const QImage img = win->grabWindow();
+    if (img.isNull()) {
+        return false;
+    }
+    const QString path = QString::fromUtf8(output_path);
+    const QDir dir = QFileInfo(path).dir();
+    if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+    }
+    if (!img.save(path)) {
+        return false;
+    }
+    if (out_width != nullptr) *out_width = img.width();
+    if (out_height != nullptr) *out_height = img.height();
+    return true;
+}
+
+bool franca_qt_get_window_size(int* out_width, int* out_height) {
+    if (!on_gui_thread() || g_engine == nullptr) {
+        return false;
+    }
+    const auto roots = g_engine->rootObjects();
+    if (roots.isEmpty()) {
+        return false;
+    }
+    auto* win = qobject_cast<QQuickWindow*>(roots.first());
+    if (win == nullptr) {
+        return false;
+    }
+    if (out_width != nullptr) *out_width = win->width();
+    if (out_height != nullptr) *out_height = win->height();
+    return true;
+}
+
+bool franca_qt_resize_window(int width, int height) {
+    if (!on_gui_thread() || g_engine == nullptr || width < 320 || height < 240) {
+        return false;
+    }
+    const auto roots = g_engine->rootObjects();
+    if (roots.isEmpty()) {
+        return false;
+    }
+    auto* win = qobject_cast<QQuickWindow*>(roots.first());
+    if (win == nullptr) {
+        return false;
+    }
+    win->resize(width, height);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 40);
+    return true;
 }
 
 } // extern "C"

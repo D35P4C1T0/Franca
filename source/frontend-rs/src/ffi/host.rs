@@ -596,11 +596,45 @@ impl CarlaHost {
         }
     }
 
+    pub fn open_project(&self, filename: &str) -> Result<(), (bool, String)> {
+        let filename = CString::new(filename).map_err(|_| (false, "Invalid project filename".into()))?;
+        let mut rack_replaced = false;
+        unsafe {
+            let open = self.lib.get::<unsafe extern "C" fn(CarlaHostHandle, *const c_char, *mut bool) -> bool>(
+                b"carla_open_project\0",
+            ).map_err(|_| (false, "This audio engine does not support project replacement".into()))?;
+            if open(self.handle, filename.as_ptr(), &mut rack_replaced) {
+                Ok(())
+            } else {
+                Err((rack_replaced, self.get_last_error()))
+            }
+        }
+    }
+
     pub fn save_project(&self, filename: &str) -> bool {
         let Ok(c) = CString::new(filename) else {
             return false;
         };
         unsafe {
+            let f: libloading::Symbol<unsafe extern "C" fn(CarlaHostHandle, *const c_char) -> bool> =
+                self.lib.get(b"carla_save_project\0").unwrap();
+            f(self.handle, c.as_ptr())
+        }
+    }
+
+    pub fn save_project_copy(&self, filename: &str) -> bool {
+        let Ok(c) = CString::new(filename) else {
+            return false;
+        };
+        unsafe {
+            if let Ok(f) = self
+                .lib
+                .get::<unsafe extern "C" fn(CarlaHostHandle, *const c_char) -> bool>(
+                    b"carla_save_project_copy\0",
+                )
+            {
+                return f(self.handle, c.as_ptr());
+            }
             let f: libloading::Symbol<unsafe extern "C" fn(CarlaHostHandle, *const c_char) -> bool> =
                 self.lib.get(b"carla_save_project\0").unwrap();
             f(self.handle, c.as_ptr())

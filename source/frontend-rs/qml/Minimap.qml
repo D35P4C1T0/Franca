@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 import QtQuick
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 Item {
@@ -11,8 +13,11 @@ Item {
     property real zoom: 1.0
     property real viewportW: 800
     property real viewportH: 600
+    property bool showDockControls: false
+    property int dockMode: 2 // 0 = hidden, 1 = top, 2 = bottom
 
     signal panRequested(real sceneX, real sceneY)
+    signal dockModeRequested(int mode)
 
     implicitHeight: 130
 
@@ -90,6 +95,49 @@ Item {
             }
             onPressed: function(mouse) { moveTo(mouse.x, mouse.y); }
             onPositionChanged: function(mouse) { if (pressed) moveTo(mouse.x, mouse.y); }
+        }
+    }
+
+    // Headerless floating dock controls inside the minimap (Clara-style)
+    Rectangle {
+        visible: root.showDockControls
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 4
+        radius: 4
+        z: 10
+        color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.78)
+        border.width: 1
+        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.16)
+        implicitWidth: dockRow.implicitWidth + 4
+        implicitHeight: dockRow.implicitHeight + 2
+
+        RowLayout {
+            id: dockRow
+            anchors.centerIn: parent
+            spacing: 0
+
+            Controls.ToolButton {
+                implicitWidth: 22
+                implicitHeight: 22
+                icon.name: root.dockMode === 1 ? "go-down" : "go-up"
+                icon.width: 12
+                icon.height: 12
+                onClicked: root.dockModeRequested(root.dockMode === 1 ? 2 : 1)
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: root.dockMode === 1 ? qsTr("Dock minimap to bottom") : qsTr("Dock minimap to top")
+            }
+
+            Controls.ToolButton {
+                implicitWidth: 22
+                implicitHeight: 22
+                icon.name: "window-close"
+                icon.width: 12
+                icon.height: 12
+                onClicked: root.dockModeRequested(0)
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.text: qsTr("Hide minimap")
+            }
         }
     }
 }
