@@ -2327,7 +2327,7 @@ public:
         // plugin hints
         const PluginCategory v3category = getPluginCategoryFromV3SubCategories(fV3ClassInfo.v2.sub_categories);
 
-        pData->hints = 0x0;
+        pData->hints = PLUGIN_NEEDS_MAIN_THREAD_IDLE;
 
         if (v3category == PLUGIN_CATEGORY_SYNTH)
             pData->hints |= PLUGIN_IS_SYNTH;
