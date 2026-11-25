@@ -35,10 +35,23 @@ typedef __sighandler_t sig_t;
 #ifndef CARLA_OS_WIN
 # include <csignal>
 # include <csetjmp>
+# include <thread>
 #endif
 
 // --------------------------------------------------------------------------------------------------------------------
 // process functions
+
+static inline
+unsigned int carla_getHardwareThreadCount() noexcept
+{
+#ifdef CARLA_OS_WIN
+    SYSTEM_INFO info;
+    ::GetSystemInfo(&info);
+    return info.dwNumberOfProcessors;
+#else
+    return std::thread::hardware_concurrency();
+#endif
+}
 
 /*
  * Set current process name.

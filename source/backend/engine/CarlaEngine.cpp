@@ -40,7 +40,6 @@
 #include <algorithm>
 #include <map>
 #include <memory>
-#include <thread>
 #include <vector>
 
 // FIXME Remove on 2.1 release
@@ -3226,7 +3225,7 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
         }
     }
 
-    const size_t hwThreads = std::max<size_t>(1, std::thread::hardware_concurrency());
+    const size_t hwThreads = std::max<size_t>(1, carla_getHardwareThreadCount());
     const size_t maxConcurrentBridges = std::max<size_t>(2, std::min<size_t>(8, hwThreads));
     const size_t maxConcurrentWineBridges = std::max<size_t>(2, std::min<size_t>(4, hwThreads / 2));
     size_t prelaunchCursor = 0;

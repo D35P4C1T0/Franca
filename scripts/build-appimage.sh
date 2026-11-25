@@ -94,7 +94,8 @@ export QML_SOURCES_PATHS="$REPO_ROOT/source/frontend-rs/qml"
 export EXTRA_QT_PLUGINS="wayland-shell-integration;wayland-decoration-client;iconengines;imageformats;platformthemes"
 
 echo "==> Running linuxdeploy + Qt6 plugin (QMAKE=$QMAKE)"
-PATH="$TOOLS_DIR:$PATH" "$LINUXDEPLOY" \
+# The strip bundled with linuxdeploy cannot read RELR relocations in newer libraries.
+NO_STRIP=1 PATH="$TOOLS_DIR:$PATH" "$LINUXDEPLOY" \
     --appdir "$APPDIR" \
     --executable "$APPDIR/usr/lib/franca/franca-ui" \
     --library "$APPDIR/usr/lib/franca/libcarla_standalone2.so" \
@@ -132,6 +133,7 @@ for remove_pat in "libjack.so*" "libpipewire-*.so*" "libasound.so*" "libGL.so*" 
 done
 
 # Write custom AppRun supporting PipeWire-JACK detection and KDE/Fusion style fallback
+rm -f "$APPDIR/AppRun"
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 set -eu

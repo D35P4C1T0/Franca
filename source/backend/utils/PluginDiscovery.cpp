@@ -7,6 +7,7 @@
 #include "CarlaBinaryUtils.hpp"
 #include "CarlaJuceUtils.hpp"
 #include "CarlaPipeUtils.hpp"
+#include "CarlaProcessUtils.hpp"
 #include "CarlaScopeUtils.hpp"
 #include "CarlaSha1Utils.hpp"
 
@@ -19,7 +20,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <memory>
-#include <thread>
 
 namespace CB = CARLA_BACKEND_NAMESPACE;
 
@@ -454,7 +454,7 @@ private:
                 return std::min(binaryCount, static_cast<uint>(parsed));
         }
 
-        const uint hw = std::max(1u, std::thread::hardware_concurrency());
+        const uint hw = std::max(1u, carla_getHardwareThreadCount());
 
         if (btype == CB::BINARY_WIN32 || btype == CB::BINARY_WIN64)
             return std::min(binaryCount, std::max(2u, std::min(4u, hw / 2)));
