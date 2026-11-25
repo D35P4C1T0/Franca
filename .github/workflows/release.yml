@@ -127,6 +127,8 @@ jobs:
           version=$(bash scripts/package-version.sh "$REQUESTED_VERSION")
           mkdir -p build dist
           flatpak-builder --user --repo=build/flatpak-repo build/flatpak "data/flatpak/$app_id.yml"
+          flatpak build build/flatpak franca --version
+          test -f "build/flatpak/export/share/mime/packages/$app_id.xml"
           flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
             build/flatpak-repo "dist/Franca-$version-x86_64.flatpak" "$app_id"
       - uses: actions/upload-artifact@v4
