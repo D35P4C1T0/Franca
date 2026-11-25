@@ -607,6 +607,25 @@ impl CarlaHost {
         }
     }
 
+    pub fn save_project_copy(&self, filename: &str) -> bool {
+        let Ok(c) = CString::new(filename) else {
+            return false;
+        };
+        unsafe {
+            if let Ok(f) = self
+                .lib
+                .get::<unsafe extern "C" fn(CarlaHostHandle, *const c_char) -> bool>(
+                    b"carla_save_project_copy\0",
+                )
+            {
+                return f(self.handle, c.as_ptr());
+            }
+            let f: libloading::Symbol<unsafe extern "C" fn(CarlaHostHandle, *const c_char) -> bool> =
+                self.lib.get(b"carla_save_project\0").unwrap();
+            f(self.handle, c.as_ptr())
+        }
+    }
+
     pub fn clear_project_filename(&self) {
         unsafe {
             let f: libloading::Symbol<unsafe extern "C" fn(CarlaHostHandle)> =

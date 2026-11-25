@@ -1,154 +1,120 @@
-name: release
+name: Release Binaries & AppImage
 
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (defaults to Makefile VERSION)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
 
 env:
-  CACHE_VERSION: 5
   DEBIAN_FRONTEND: noninteractive
-  HOMEBREW_NO_AUTO_UPDATE: 1
-  HOMEBREW_NO_INSTALL_CLEANUP: 1
-  PAWPAW_SKIP_LTO: 1
-  PAWPAW_SKIP_TESTS: 1
-  PAWPAW_VERSION: 2606d0d436471b12902d60edd2aeb2390db44e62
+  CARGO_TERM_COLOR: always
 
 jobs:
-  # macOS native universal build
-  macos_universal:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/PawPawBuilds
-          key: macos-universal-v${{ env.CACHE_VERSION }}
-      - name: Set up dependencies
-        run: |
-          brew install cmake jq meson
-      - name: Bootstrap macOS universal
-        shell: bash
-        run: |
-          git clone https://github.com/DISTRHO/PawPaw.git
-          git -C PawPaw checkout ${{ env.PAWPAW_VERSION }}
-          ./PawPaw/.github/workflows/bootstrap-deps.sh macos-universal
-          ./PawPaw/bootstrap-carla.sh macos-universal && ./PawPaw/.cleanup.sh macos-universal
-      - name: Build macOS universal
-        shell: bash
-        run: |
-          source PawPaw/local.env macos-universal
-          make features
-          make NOOPT=true ${MAKE_ARGS}
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} -j 1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macOS dmg
-          path: ./*.dmg
-      - uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            ./*.dmg
+  build-linux-x86_64:
+    name: Linux x86_64 (Prebuilt Tarball + AppImage)
+    runs-on: ubuntu-24.04
 
-  # linux with win32 cross-compilation
-  win32:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up cache
-        uses: actions/cache@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          path: |
-            ~/PawPawBuilds
-          key: win32-v${{ env.CACHE_VERSION }}
-      - name: Bootstrap win32 cross-compiled
-        shell: bash
-        run: |
-          apt-get update -qq
-          apt-get install -yqq git unzip zip
-          git clone https://github.com/DISTRHO/PawPaw.git
-          git -C PawPaw checkout ${{ env.PAWPAW_VERSION }}
-          ./PawPaw/.github/workflows/bootstrap-deps.sh win32
-          ./PawPaw/bootstrap-carla.sh win32 && ./PawPaw/.cleanup.sh win32
-      - name: Build win32 cross-compiled
-        shell: bash
-        run: |
-          source PawPaw/local.env win32
-          make features
-          make NOOPT=true ${MAKE_ARGS}
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} -j 1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win32 zip
-          path: ./*.zip
-      - uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            ./*.zip
+          submodules: recursive
 
-  # linux with win64 cross-compilation
-  win64:
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up cache
-        uses: actions/cache@v4
+      - name: Resolve release version
+        id: meta
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VER="${{ github.event.inputs.version }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF#refs/tags/v}"
+          else
+            VER="$(sed -n 's/^VERSION[[:space:]]*:=[[:space:]]*//p' Makefile | head -n1)"
+          fi
+          VER="${VER#v}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VER}"
+
+      - name: Install build dependencies (C++, Qt 6, Kirigami 6, Audio)
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -yqq \
+            build-essential cmake pkg-config clang libclang-dev patchelf desktop-file-utils file zstd xvfb \
+            g++-multilib libx11-6:i386 libxext6:i386 \
+            libasound2-dev libfluidsynth-dev libgl1-mesa-dev liblo-dev libmagic-dev \
+            libpulse-dev libsdl2-dev libsndfile1-dev libjack-jackd2-dev \
+            libx11-dev libxcursor-dev libxext-dev libxrandr-dev \
+            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-declarative-dev-tools \
+            qt6-svg-dev qt6-wayland qt6-l10n-tools \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+            qml6-module-org-kde-kirigami libkf6kirigami-dev \
+            pyqt6-dev-tools python3-pyqt6
+          sudo ln -sf /usr/lib/i386-linux-gnu/libX11.so.6 /usr/lib/i386-linux-gnu/libX11.so
+          sudo ln -sf /usr/lib/i386-linux-gnu/libXext.so.6 /usr/lib/i386-linux-gnu/libXext.so
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/PawPawBuilds
-          key: win64-v${{ env.CACHE_VERSION }}
-      - name: Bootstrap win64 cross-compiled
-        shell: bash
+          workspaces: source/frontend-rs
+
+      - name: Build Franca backend, bridges, discovery, and Rust UI
         run: |
-          apt-get update -qq
-          apt-get install -yqq git unzip zip
-          git clone https://github.com/DISTRHO/PawPaw.git
-          git -C PawPaw checkout ${{ env.PAWPAW_VERSION }}
-          ./PawPaw/.github/workflows/bootstrap-deps.sh win64
-          ./PawPaw/bootstrap-carla.sh win64 && ./PawPaw/.cleanup.sh win64
-      - name: Build win64 cross-compiled
-        shell: bash
-        run: |
-          source PawPaw/local.env win64
           make features
-          make NOOPT=true ${MAKE_ARGS}
-          make NOOPT=true ${MAKE_ARGS} win32r
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} TESTING=true -j 1
-          make dist ${MAKE_ARGS} -j 1
-      - uses: actions/upload-artifact@v4
+          make -j"$(nproc)"
+          make posix32 -j"$(nproc)"
+          make rust-ui
+
+      - name: Run Franca smoke tests, Rust tests, and UI regression suite
+        run: |
+          make check-franca
+          make check-rust-ui
+          make check-ui-contracts
+          QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x800x24" python3 scripts/ui_smoke.py -v
+
+      - name: Build prebuilt Linux binary archive
+        run: |
+          chmod +x scripts/build-release-bundle.sh scripts/build-appimage.sh
+          ./scripts/build-release-bundle.sh --no-build --arch=x86_64 --version="${{ steps.meta.outputs.version }}"
+
+      - name: Build AppImage
+        run: |
+          ./scripts/build-appimage.sh --no-build --arch=x86_64 --version="${{ steps.meta.outputs.version }}"
+
+      - name: Generate combined checksums
+        run: |
+          cd dist
+          sha256sum Franca-*.tar.gz Franca-*.AppImage > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: win64 zip
-          path: ./*.zip
-      - uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+          name: franca-linux-x86_64-${{ steps.meta.outputs.version }}
+          path: |
+            dist/Franca-*.tar.gz
+            dist/Franca-*.AppImage
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+          generate_release_notes: true
           files: |
-            ./*.zip
+            dist/Franca-*.tar.gz
+            dist/Franca-*.AppImage
+            dist/SHA256SUMS.txt

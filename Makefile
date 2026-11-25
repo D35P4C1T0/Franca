@@ -389,7 +389,7 @@ doxygen:
 tests:
 	$(MAKE) -C source/tests
 
-.PHONY: check-franca rust-ui check-rust-ui
+.PHONY: check-franca rust-ui check-rust-ui check-ui-contracts check-ui-smoke
 check-franca: backend discovery
 	PYTHONPATH=source/frontend python3 source/tests/franca-smoke.py
 
@@ -399,6 +399,12 @@ rust-ui:
 
 check-rust-ui: backend discovery
 	cargo test --manifest-path source/frontend-rs/Cargo.toml
+
+check-ui-contracts:
+	python3 source/tests/test_ui_regression.py
+
+check-ui-smoke: backend discovery rust-ui
+	python3 scripts/ui_smoke.py
 
 stoat:
 	stoat --recursive ./build/ --suppression ./data/stoat-supression.txt --whitelist ./data/stoat-whitelist.txt --graph-view ./data/stoat-callgraph.png
@@ -424,6 +430,7 @@ ifeq ($(HAVE_FRONTEND),true)
 		"$(DESTDIR)$(DATADIR)/icons/hicolor/256x256/apps"
 	install -m 755 data/franca "$(DESTDIR)$(BINDIR)/franca"
 	sed $(SED_ARGS) 's?X-LIBDIR-X?$(LIBDIR)?' -e 's?X-DATADIR-X?$(DATADIR)?' "$(DESTDIR)$(BINDIR)/franca"
+	install -m 755 scripts/francamsg "$(DESTDIR)$(BINDIR)/francamsg"
 	install -m 644 data/desktop/franca.desktop "$(DESTDIR)$(DATADIR)/applications/"
 	install -m 644 data/carla.xml "$(DESTDIR)$(DATADIR)/mime/packages/franca.xml"
 	install -m 644 resources/256x256/franca.png "$(DESTDIR)$(DATADIR)/icons/hicolor/256x256/apps/franca.png"
@@ -465,7 +472,7 @@ endif
 install: install_main
 
 uninstall:
-	rm -f "$(DESTDIR)$(BINDIR)/franca" "$(DESTDIR)$(DATADIR)/applications/franca.desktop" \
+	rm -f "$(DESTDIR)$(BINDIR)/franca" "$(DESTDIR)$(BINDIR)/francamsg" "$(DESTDIR)$(DATADIR)/applications/franca.desktop" \
 		"$(DESTDIR)$(DATADIR)/mime/packages/franca.xml" "$(DESTDIR)$(DATADIR)/icons/hicolor/256x256/apps/franca.png"
 	rm -rf "$(DESTDIR)$(FRANCA_LIBDIR)" "$(DESTDIR)$(FRANCA_DATADIR)"
 

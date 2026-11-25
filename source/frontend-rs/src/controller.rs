@@ -17,15 +17,21 @@ use crate::ffi::types::*;
 use crate::ffi::utils::{CarlaUtils, DiscoveredPlugin};
 use crate::ffi::{dirs_home, lib_filename, resolve_carla_paths};
 use crate::history::{EditHistory, HistoryAction, MergeKey};
+use crate::ipc::{IpcRequest, IpcResponse, IpcServer};
 use crate::logging;
 use crate::model::category::{
     FRANCA_CATEGORY_PROPERTY, FRANCA_PLUGIN_CATEGORIES, category_hex, category_key, category_label,
     parse_category_key,
 };
 use crate::model::meters::{ClipWarningState, PeakMeterState, monotonic_secs};
-use crate::patchbay::PatchbayState;
+use crate::patchbay::{CapturedPluginWiring, PatchbayState};
 use crate::patchbay::arrange::NodeKey;
+use crate::patchbay::rewire;
 use crate::project::{PluginSnapshot, is_project_file, is_supported_file};
+use crate::session::{
+    RecoveryInfo, autosave_dir_for, check_pending_recovery, mark_session_clean,
+    next_autosave_path, prune_old_autosaves, record_autosave_manifest,
+};
 use crate::settings::{
     FrancaSettings, default_clap_paths, default_dssi_paths, default_jsfx_paths,
     default_ladspa_paths, default_lv2_paths, default_sf2_paths, default_sfz_paths,
@@ -35,6 +41,19 @@ use crate::settings::{
 pub static SIG_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 pub static SIG_SAVE_REQUESTED: AtomicBool = AtomicBool::new(false);
 pub static INITIAL_PROJECT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+unsafe extern "C" {
+    fn franca_qt_grab_window(
+        output_path: *const std::ffi::c_char,
+        out_width: *mut std::ffi::c_int,
+        out_height: *mut std::ffi::c_int,
+    ) -> bool;
+    fn franca_qt_get_window_size(
+        out_width: *mut std::ffi::c_int,
+        out_height: *mut std::ffi::c_int,
+    ) -> bool;
+    fn franca_qt_resize_window(width: std::ffi::c_int, height: std::ffi::c_int) -> bool;
+}
 
 pub struct RackSlot {
     pub plugin_id: u32,
@@ -135,6 +154,7 @@ impl RackSlot {
 #[derive(Clone, Debug, Default)]
 pub struct PendingUiSignals {
     pub alerts: Vec<(String, String)>,
+    pub ipc_ui_actions: Vec<(String, String)>,
     pub focus_patchbay: bool,
     pub quit_requested: bool,
     pub rack_dirty: bool,
@@ -168,6 +188,10 @@ pub struct FrancaCore {
     pub transport_info: CarlaTransportInfo,
     pub transport_link: bool,
     pub project_filename: Option<PathBuf>,
+    pub project_dirty: bool,
+    pub last_autosave: Instant,
+    pub last_autosave_label: String,
+    pub pending_recovery: Option<RecoveryInfo>,
     pub is_project_loading: bool,
     pub removing_all_plugins: bool,
     pub external_patchbay: bool,
@@ -187,6 +211,7 @@ pub struct FrancaCore {
     pub current_dir: PathBuf,
     pub selected_folder_idx: usize,
     pub last_log_count: usize,
+    pub ipc_server: Option<IpcServer>,
     pub pending: PendingUiSignals,
 }
 
@@ -226,6 +251,7 @@ impl FrancaCore {
             PatchbayState::new(settings.canvas_width as f32, settings.canvas_height as f32);
         patchbay.use_bezier = settings.canvas_use_bezier;
         patchbay.auto_hide_groups = settings.canvas_auto_hide_groups;
+        patchbay.hide_unused_ports = settings.canvas_hide_unused_ports;
 
         let nsm_active = if std::env::var("NSM_URL").is_ok() {
             host.as_ref()
@@ -236,6 +262,21 @@ impl FrancaCore {
 
         let transport_link = settings.transport_extra.contains(":link:");
         let initial_external_patchbay = settings.process_mode != ENGINE_PROCESS_MODE_PATCHBAY;
+
+        let ipc_server = match IpcServer::start(CARLA_VERSION_STRING) {
+            Ok(srv) => {
+                logging::log_info(&format!(
+                    "IPC server listening on {} (key={})",
+                    srv.socket_path().display(),
+                    srv.key()
+                ));
+                Some(srv)
+            }
+            Err(e) => {
+                logging::log_warn(&format!("Could not start IPC server: {e}"));
+                None
+            }
+        };
 
         let mut core = Self {
             host,
@@ -259,6 +300,10 @@ impl FrancaCore {
             transport_info: CarlaTransportInfo::default(),
             transport_link,
             project_filename: None,
+            project_dirty: false,
+            last_autosave: Instant::now(),
+            last_autosave_label: String::new(),
+            pending_recovery: None,
             is_project_loading: false,
             removing_all_plugins: false,
             external_patchbay: initial_external_patchbay,
@@ -276,6 +321,7 @@ impl FrancaCore {
             current_dir: dirs_home(),
             selected_folder_idx: 0,
             last_log_count: 0,
+            ipc_server,
             pending: PendingUiSignals {
                 rack_dirty: true,
                 patchbay_dirty: true,
@@ -291,21 +337,97 @@ impl FrancaCore {
             let init_proj = INITIAL_PROJECT.lock().ok().and_then(|mut g| g.take());
             if let Some(proj) = init_proj {
                 core.load_project_or_file(&proj);
+            } else if core.settings.autosave_enabled {
+                core.pending_recovery = check_pending_recovery();
             }
         }
         core
     }
 
+    pub fn mark_dirty(&mut self) {
+        if !self.is_project_loading && self.engine_running {
+            self.project_dirty = true;
+        }
+    }
+
     pub fn window_title(&self) -> String {
+        let dirty = if self.project_dirty { " *" } else { "" };
         match self
             .project_filename
             .as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
         {
-            Some(name) => format!("Franca — {name}"),
+            Some(name) => format!("Franca — {name}{dirty}"),
+            None if self.project_dirty => "Franca — Untitled *".to_string(),
             None => "Franca".to_string(),
         }
+    }
+
+    pub fn perform_autosave(&mut self) -> bool {
+        if !self.engine_running
+            || self.is_project_loading
+            || self.nsm_active
+            || !self.project_dirty
+            || self.slots.is_empty()
+        {
+            return false;
+        }
+        let Some(ref host) = self.host else {
+            return false;
+        };
+        let dir = autosave_dir_for(self.project_filename.as_deref());
+        if let Err(e) = fs::create_dir_all(&dir) {
+            logging::log_warn(&format!("Autosave directory error: {e}"));
+            return false;
+        }
+        let target = next_autosave_path(&dir);
+        let target_str = target.to_string_lossy().into_owned();
+        if !host.save_project_copy(&target_str) {
+            let err = host.get_last_error();
+            logging::log_warn(&format!("Autosave failed: {err}"));
+            return false;
+        }
+        prune_old_autosaves(&dir, self.settings.max_autosaves.max(1) as usize);
+        record_autosave_manifest(self.project_filename.as_deref(), &target);
+        self.last_autosave = Instant::now();
+        self.last_autosave_label = chrono::Local::now().format("%H:%M:%S").to_string();
+        logging::log_info(&format!("Autosaved session to {target_str}"));
+        true
+    }
+
+    pub fn recover_pending_session(&mut self) {
+        let Some(rec) = self.pending_recovery.take() else {
+            return;
+        };
+        let autosave_path = PathBuf::from(&rec.autosave_path);
+        if !autosave_path.is_file() {
+            mark_session_clean();
+            self.pending.alerts.push((
+                "Recovery Unavailable".into(),
+                "The autosave file is no longer present on disk.".into(),
+            ));
+            return;
+        }
+        if self.load_project(&autosave_path) {
+            // Restore original project target path so Ctrl+S saves back to the real file,
+            // and keep dirty=true so the user remembers to save the recovered session.
+            self.project_filename = if rec.project_path.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(&rec.project_path))
+            };
+            self.project_dirty = true;
+            logging::log_ui(&format!(
+                "Recovered session from autosave ({})",
+                rec.saved_at_display
+            ));
+        }
+    }
+
+    pub fn dismiss_pending_recovery(&mut self) {
+        self.pending_recovery = None;
+        mark_session_clean();
     }
 
     pub fn start_engine(&mut self, silent: bool) {
@@ -368,6 +490,10 @@ impl FrancaCore {
             runner.cancel(utils);
         }
         let _ = self.settings.save();
+        mark_session_clean();
+        if let Some(mut srv) = self.ipc_server.take() {
+            srv.shutdown();
+        }
         if let Some(ref host) = self.host {
             host.finish_cancelable_ui();
             if host.is_engine_running() {
@@ -404,6 +530,8 @@ impl FrancaCore {
         if SIG_QUIT_REQUESTED.swap(false, Ordering::SeqCst) {
             self.pending.quit_requested = true;
         }
+
+        self.drain_ipc_requests();
 
         if self.engine_running || self.nsm_active {
             if let Some(ref host) = self.host {
@@ -458,6 +586,18 @@ impl FrancaCore {
                 if self.last_slow_poll.elapsed() >= Duration::from_millis(250) {
                     self.last_slow_poll = Instant::now();
                     self.runtime_info = host.get_runtime_engine_info();
+                }
+            }
+
+            if self.settings.autosave_enabled
+                && self.project_dirty
+                && !self.is_project_loading
+                && !self.nsm_active
+                && !self.slots.is_empty()
+            {
+                let interval = Duration::from_secs(self.settings.autosave_interval_secs.max(15) as u64);
+                if self.last_autosave.elapsed() >= interval {
+                    self.perform_autosave();
                 }
             }
         }
@@ -593,6 +733,7 @@ impl FrancaCore {
                     self.history_plugin_count = self.slots.len();
                     logging::log_ui(&format!("Plugin added: {pname} (id={pid})"));
                     if !self.history.busy && !self.history.blocked && !self.is_project_loading {
+                        self.mark_dirty();
                         if self.history_plugin_count == before + 1 && self.can_restore_plugin(pid) {
                             self.history.record(
                                 "Add Effect",
@@ -620,6 +761,9 @@ impl FrancaCore {
                     }
                 }
                 self.history_plugin_count = self.slots.len();
+                if !self.is_project_loading {
+                    self.mark_dirty();
+                }
                 if !self.history.busy {
                     self.history.clear();
                 }
@@ -852,6 +996,10 @@ impl FrancaCore {
             host.clear_project_filename();
         }
         self.project_filename = None;
+        self.project_dirty = false;
+        self.last_autosave = Instant::now();
+        self.last_autosave_label.clear();
+        mark_session_clean();
         self.drain_engine_events();
         self.pending.rack_dirty = true;
         self.pending.patchbay_dirty = true;
@@ -870,11 +1018,12 @@ impl FrancaCore {
         }
     }
 
-    pub fn load_project(&mut self, path: &Path) {
+    pub fn load_project(&mut self, path: &Path) -> bool {
         if !self.engine_running {
-            return;
+            return false;
         }
-        self.history.clear();
+        let prev_filename = self.project_filename.clone();
+        let prev_dirty = self.project_dirty;
         self.is_project_loading = true;
         let path_str = path.to_string_lossy().into_owned();
         let res = self.host.as_ref().map(|h| {
@@ -882,15 +1031,25 @@ impl FrancaCore {
             h.finish_cancelable_ui();
             (ok, h.get_last_error())
         });
+        let mut loaded_ok = false;
         if let Some((ok, err)) = res {
             if !ok {
                 self.is_project_loading = false;
+                // Failed load guard: keep current session filename & dirty flag intact
+                self.project_filename = prev_filename;
+                self.project_dirty = prev_dirty;
                 logging::log_error(&format!("Failed to load project {path_str}: {err}"));
                 self.pending
                     .alerts
                     .push(("Load Project Failed".into(), format!("Could not load project:\n{err}")));
             } else {
+                loaded_ok = true;
+                self.history.clear();
                 self.project_filename = Some(path.to_path_buf());
+                self.project_dirty = false;
+                self.last_autosave = Instant::now();
+                self.last_autosave_label.clear();
+                mark_session_clean();
                 logging::log_ui(&format!("Loaded project: {path_str}"));
             }
         }
@@ -899,6 +1058,7 @@ impl FrancaCore {
         self.history.set_blocked(false);
         self.pending.rack_dirty = true;
         self.pending.patchbay_dirty = true;
+        loaded_ok
     }
 
     pub fn load_project_or_file(&mut self, path: &Path) {
@@ -906,7 +1066,7 @@ impl FrancaCore {
             return;
         }
         if is_project_file(path) {
-            self.load_project(path);
+            let _ = self.load_project(path);
         } else {
             let s = path.to_string_lossy().into_owned();
             if let Some(ref host) = self.host {
@@ -918,6 +1078,7 @@ impl FrancaCore {
                         .alerts
                         .push(("Load File Failed".into(), format!("Could not load file:\n{err}")));
                 } else {
+                    self.mark_dirty();
                     logging::log_ui(&format!("Loaded file: {s}"));
                 }
             }
@@ -925,15 +1086,15 @@ impl FrancaCore {
         }
     }
 
-    pub fn file_save(&mut self) {
+    pub fn file_save(&mut self) -> bool {
         if let Some(path) = self.project_filename.clone() {
-            self.save_project_to(&path);
+            self.save_project_to(&path)
         } else {
-            self.file_save_as_dialog();
+            self.file_save_as_dialog()
         }
     }
 
-    pub fn file_save_as_dialog(&mut self) {
+    pub fn file_save_as_dialog(&mut self) -> bool {
         let mut dlg = rfd::FileDialog::new()
             .set_title("Save Franca Project")
             .add_filter("Carla/Franca Projects", &["carxp"])
@@ -945,17 +1106,29 @@ impl FrancaCore {
             if path.extension().is_none() {
                 path.set_extension("carxp");
             }
-            self.save_project_to(&path);
+            return self.save_project_to(&path);
         }
+        false
     }
 
     pub fn save_project_to(&mut self, path: &Path) -> bool {
         if !self.engine_running {
             return false;
         }
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            if let Err(e) = fs::create_dir_all(parent) {
+                logging::log_error(&format!("Save project failed (mkdir): {e}"));
+                self.pending.alerts.push((
+                    "Save Project Failed".into(),
+                    format!("Could not create target directory:\n{e}"),
+                ));
+                return false;
+            }
+        }
         let s = path.to_string_lossy().into_owned();
         if let Some(ref host) = self.host {
             if !host.save_project(&s) {
+                // Failed save guard: keep project_dirty untouched and preserve existing autosaves
                 let err = host.get_last_error();
                 logging::log_error(&format!("Save project failed: {err}"));
                 self.pending
@@ -964,6 +1137,9 @@ impl FrancaCore {
                 return false;
             }
             self.project_filename = Some(path.to_path_buf());
+            self.project_dirty = false;
+            self.last_autosave = Instant::now();
+            mark_session_clean();
             logging::log_ui(&format!("Saved project: {s}"));
             return true;
         }
@@ -1006,6 +1182,7 @@ impl FrancaCore {
     pub fn move_plugin(&mut self, source: u32, target: u32) {
         let moved = self.move_plugin_raw(source, target);
         if moved != source {
+            self.mark_dirty();
             self.history.record(
                 "Move Effect",
                 HistoryAction::MovePlugin {
@@ -1044,6 +1221,7 @@ impl FrancaCore {
         self.pending.rack_dirty = true;
         self.pending.plugin_edit_dirty_ids.push(plugin_id);
         if before != after {
+            self.mark_dirty();
             self.history.record(
                 "Rename Effect",
                 HistoryAction::RenamePlugin {
@@ -1070,6 +1248,7 @@ impl FrancaCore {
         self.pending.rack_dirty = true;
         self.pending.plugin_edit_dirty_ids.push(plugin_id);
         if before != after {
+            self.mark_dirty();
             self.history.record(
                 if after { "Enable Effect" } else { "Disable Effect" },
                 HistoryAction::SetActive {
@@ -1096,6 +1275,7 @@ impl FrancaCore {
         let after = host.get_internal_parameter_value(plugin_id, param_id);
         self.pending.plugin_edit_dirty_ids.push(plugin_id);
         if (before - after).abs() > 1e-7 {
+            self.mark_dirty();
             self.history.record(
                 "Change Parameter",
                 HistoryAction::SetInternalParam {
@@ -1116,6 +1296,7 @@ impl FrancaCore {
         let after = host.get_current_parameter_value(plugin_id, param_id);
         self.pending.plugin_edit_dirty_ids.push(plugin_id);
         if (before - after).abs() > 1e-7 {
+            self.mark_dirty();
             self.history.record(
                 "Change Parameter",
                 HistoryAction::SetParam {
@@ -1155,6 +1336,7 @@ impl FrancaCore {
         }
         self.pending.plugin_edit_dirty_ids.push(plugin_id);
         if !before.is_empty() {
+            self.mark_dirty();
             self.history.record(
                 label,
                 HistoryAction::SetParamsBatch {
@@ -1177,6 +1359,7 @@ impl FrancaCore {
             return;
         }
         slot.set_category(host, category, true);
+        self.mark_dirty();
         self.pending.rack_dirty = true;
         self.history.record(
             "Set Category",
@@ -1237,7 +1420,12 @@ impl FrancaCore {
         self.drain_engine_events();
     }
 
-    pub fn add_discovered_plugin(&mut self, p: &DiscoveredPlugin, replace_id: Option<u32>) {
+    pub fn add_discovered_plugin(
+        &mut self,
+        p: &DiscoveredPlugin,
+        replace_id: Option<u32>,
+        bridge_mode: i32,
+    ) {
         if !self.engine_running {
             self.pending.alerts.push((
                 "Engine Stopped".into(),
@@ -1245,6 +1433,41 @@ impl FrancaCore {
             ));
             return;
         }
+
+        // Capture existing patchbay wiring & box position before replacing a plugin
+        let captured_wiring: Option<(String, bool, CapturedPluginWiring)> =
+            if let Some(rid) = replace_id {
+                let old_name = self
+                    .slots
+                    .get(rid as usize)
+                    .map(|s| s.info.name.clone())
+                    .unwrap_or_default();
+                let was_ext = self.external_patchbay;
+                // In Patchbay mode, ensure internal routing graph is populated for rewiring
+                let capture_ext = if self.process_mode == ENGINE_PROCESS_MODE_PATCHBAY {
+                    if was_ext {
+                        self.switch_patchbay_view(false);
+                    }
+                    false
+                } else {
+                    was_ext
+                };
+                let wiring = self.patchbay.capture_plugin_wiring(rid, &old_name);
+                if was_ext != self.external_patchbay {
+                    self.switch_patchbay_view(was_ext);
+                }
+                wiring.map(|w| (old_name, capture_ext, w))
+            } else {
+                None
+            };
+
+        let options = match bridge_mode {
+            1 => PLUGIN_OPTION_USE_BRIDGE,
+            2 => PLUGIN_OPTION_AVOID_BRIDGE,
+            _ => PLUGIN_OPTIONS_NULL,
+        };
+
+        let mut loaded_ok = false;
         if let Some(ref host) = self.host {
             if let Some(rid) = replace_id {
                 let _ = host.replace_plugin(rid);
@@ -1266,7 +1489,7 @@ impl FrancaCore {
                 name_opt,
                 &label,
                 p.unique_id as i64,
-                PLUGIN_OPTIONS_NULL,
+                options,
             );
             host.finish_cancelable_ui();
             if !ok {
@@ -1276,9 +1499,95 @@ impl FrancaCore {
                     "Failed to Load Plugin".into(),
                     format!("Could not load '{}':\n{err}", p.name),
                 ));
+            } else {
+                loaded_ok = true;
             }
         }
         self.drain_engine_events();
+
+        if loaded_ok {
+            self.mark_dirty();
+            if let (Some(rid), Some((old_name, capture_ext, wiring))) = (replace_id, captured_wiring)
+            {
+                self.rewire_replaced_plugin(rid, &old_name, &p.name, capture_ext, &wiring);
+            }
+        }
+    }
+
+    fn rewire_replaced_plugin(
+        &mut self,
+        plugin_id: u32,
+        old_name: &str,
+        new_name: &str,
+        capture_ext: bool,
+        wiring: &CapturedPluginWiring,
+    ) {
+        let prev_ext = self.external_patchbay;
+        if prev_ext != capture_ext {
+            self.switch_patchbay_view(capture_ext);
+        } else {
+            self.refresh_patchbay();
+        }
+
+        let fallback = self
+            .slots
+            .get(plugin_id as usize)
+            .map(|s| s.info.name.clone())
+            .unwrap_or_else(|| new_name.to_string());
+        let Some(new_gid) = self.patchbay.find_group_for_plugin(plugin_id, &fallback) else {
+            if prev_ext != self.external_patchbay {
+                self.switch_patchbay_view(prev_ext);
+            }
+            return;
+        };
+
+        // Restore previous patchbay position and split state
+        if wiring.has_custom_pos {
+            if let Some(g) = self.patchbay.groups.get_mut(&new_gid) {
+                g.pos1 = wiring.pos1;
+                g.pos2 = wiring.pos2;
+                g.split = wiring.split;
+                g.has_custom_pos = true;
+            }
+            self.commit_group_position(new_gid);
+        }
+
+        if !wiring.connections.is_empty() {
+            let new_ports = self.patchbay.collect_group_rewire_ports(new_gid);
+            let plan = rewire::compute_rewire_plan(&wiring.old_ports, &wiring.connections, &new_ports);
+            let planned = plan.len();
+            let mut reconnected = 0usize;
+            for action in &plan {
+                let peer_ep = crate::history::PatchbayEndpoint {
+                    group_name: action.peer_group_name.clone(),
+                    port_name: action.peer_port_name.clone(),
+                    is_input: action.peer_is_input,
+                };
+                if let Some((peer_gid, peer_pid)) = self.patchbay.lookup_endpoint(&peer_ep) {
+                    let (g_out, p_out, g_in, p_in) = if action.new_port_is_input {
+                        (peer_gid, peer_pid, new_gid, action.new_port_id)
+                    } else {
+                        (new_gid, action.new_port_id, peer_gid, peer_pid)
+                    };
+                    if self.patchbay.find_connection(g_out, p_out, g_in, p_in).is_none()
+                        && self.host.as_ref().is_some_and(|h| {
+                            h.patchbay_connect(capture_ext, g_out, p_out, g_in, p_in)
+                        })
+                    {
+                        reconnected += 1;
+                    }
+                }
+            }
+            self.drain_engine_events();
+            logging::log_ui(&format!(
+                "Rewired {reconnected}/{planned} connections after replacing '{old_name}' with '{fallback}'"
+            ));
+        }
+
+        if prev_ext != self.external_patchbay {
+            self.switch_patchbay_view(prev_ext);
+        }
+        self.pending.patchbay_dirty = true;
     }
 
     // --- Patchbay actions ---
@@ -1320,6 +1629,7 @@ impl FrancaCore {
             return;
         }
         self.drain_engine_events();
+        self.mark_dirty();
         if let (Some(output), Some(input)) = (ep_out, ep_in) {
             self.history.record(
                 "Connect Ports",
@@ -1354,6 +1664,7 @@ impl FrancaCore {
             return;
         }
         self.drain_engine_events();
+        self.mark_dirty();
         if let Some((output, input)) = eps {
             self.history.record(
                 "Disconnect Ports",
@@ -1378,6 +1689,7 @@ impl FrancaCore {
         }
         let after = self.patchbay.capture_positions();
         if before != after {
+            self.mark_dirty();
             self.history.record(
                 "Arrange Patchbay",
                 HistoryAction::PatchbayArrange {
@@ -1409,6 +1721,7 @@ impl FrancaCore {
                 x2,
                 y2,
             );
+            self.mark_dirty();
         }
     }
 
@@ -1424,6 +1737,8 @@ impl FrancaCore {
         if let Some(msg) = err {
             self.history.revert_undo_index();
             self.pending.alerts.push(("Undo Failed".into(), msg));
+        } else {
+            self.mark_dirty();
         }
     }
 
@@ -1437,6 +1752,8 @@ impl FrancaCore {
         if let Some(msg) = err {
             self.history.revert_redo_index();
             self.pending.alerts.push(("Redo Failed".into(), msg));
+        } else {
+            self.mark_dirty();
         }
     }
 
@@ -2530,5 +2847,500 @@ impl FrancaCore {
 
     pub fn build_param_groups_map(&self) -> BTreeMap<String, Vec<u32>> {
         BTreeMap::new()
+    }
+
+    // --- Scriptable IPC Command Dispatcher ---
+
+    pub fn drain_ipc_requests(&mut self) {
+        let pending = match self.ipc_server.as_ref() {
+            Some(srv) => srv.drain_pending(),
+            None => return,
+        };
+        for item in pending {
+            let resp = self.handle_ipc_request(&item.request);
+            let _ = item.reply_tx.send(resp);
+        }
+    }
+
+    pub fn handle_ipc_request(&mut self, req: &IpcRequest) -> IpcResponse {
+        use serde_json::{Value, json};
+        let args = &req.args;
+        match req.cmd.as_str() {
+            "status" => {
+                let mut win_w: std::ffi::c_int = 0;
+                let mut win_h: std::ffi::c_int = 0;
+                let has_win = unsafe { franca_qt_get_window_size(&mut win_w, &mut win_h) };
+                IpcResponse::ok(json!({
+                    "pid": std::process::id(),
+                    "version": CARLA_VERSION_STRING,
+                    "instance_key": self.ipc_server.as_ref().map(|s| s.key()).unwrap_or(""),
+                    "engine_running": self.engine_running,
+                    "driver": self.running_driver_name,
+                    "process_mode": process_mode_label(self.process_mode),
+                    "buffer_size": self.buffer_size,
+                    "sample_rate": self.sample_rate,
+                    "plugin_count": self.slots.len(),
+                    "project_filename": self.project_filename.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                    "project_dirty": self.project_dirty,
+                    "autosave_label": self.last_autosave_label,
+                    "split_view": self.settings.split_view,
+                    "split_view_ratio": self.settings.split_view_ratio,
+                    "split_minimap_dock": self.settings.split_minimap_dock,
+                    "hide_unused_ports": self.patchbay.hide_unused_ports,
+                    "external_patchbay": self.external_patchbay,
+                    "can_undo": self.history.can_undo(),
+                    "can_redo": self.history.can_redo(),
+                    "undo_label": self.history.undo_label(),
+                    "redo_label": self.history.redo_label(),
+                    "xruns": self.runtime_info.xruns,
+                    "dsp_load": self.runtime_info.load,
+                    "window_width": if has_win { win_w } else { 0 },
+                    "window_height": if has_win { win_h } else { 0 },
+                }))
+            }
+            "rack.list" => {
+                let parsed: Value =
+                    serde_json::from_str(&self.rack_json()).unwrap_or_else(|_| json!([]));
+                IpcResponse::ok(json!({ "plugins": parsed }))
+            }
+            "rack.add" => {
+                let bridge_mode = args.get("bridge_mode").and_then(Value::as_i64).unwrap_or(0) as i32;
+                let replace_id = args.get("replace_id").and_then(Value::as_u64).map(|v| v as u32);
+                if let Some(key) = args.get("key").and_then(Value::as_str) {
+                    let found = self
+                        .db
+                        .plugins
+                        .iter()
+                        .find(|p| p.unique_key() == key)
+                        .cloned();
+                    let Some(plugin) = found else {
+                        return IpcResponse::err(format!("Unknown plugin key: {key}"));
+                    };
+                    let before = self.slots.len();
+                    self.add_discovered_plugin(&plugin, replace_id, bridge_mode);
+                    IpcResponse::ok(json!({
+                        "plugin_count": self.slots.len(),
+                        "added": self.slots.len() > before || replace_id.is_some(),
+                    }))
+                } else if let Some(label) = args.get("label").and_then(Value::as_str) {
+                    let ptype = args
+                        .get("ptype")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(PLUGIN_INTERNAL as i64) as i32;
+                    let filename = args.get("filename").and_then(Value::as_str).unwrap_or("");
+                    let name = args.get("name").and_then(Value::as_str).unwrap_or(label);
+                    let unique_id = args.get("unique_id").and_then(Value::as_u64).unwrap_or(0);
+                    let dp = DiscoveredPlugin {
+                        build: BINARY_NATIVE,
+                        ptype,
+                        filename: filename.to_string(),
+                        name: name.to_string(),
+                        label: label.to_string(),
+                        maker: String::new(),
+                        category: PLUGIN_CATEGORY_NONE,
+                        hints: 0,
+                        unique_id,
+                        audio_ins: 0,
+                        audio_outs: 0,
+                        cv_ins: 0,
+                        cv_outs: 0,
+                        midi_ins: 0,
+                        midi_outs: 0,
+                        parameter_ins: 0,
+                        parameter_outs: 0,
+                    };
+                    let before = self.slots.len();
+                    self.add_discovered_plugin(&dp, replace_id, bridge_mode);
+                    IpcResponse::ok(json!({
+                        "plugin_count": self.slots.len(),
+                        "added": self.slots.len() > before || replace_id.is_some(),
+                    }))
+                } else {
+                    IpcResponse::err("rack.add requires 'key' or 'label'")
+                }
+            }
+            "rack.remove" => {
+                if args.get("all").and_then(Value::as_bool).unwrap_or(false) {
+                    self.remove_all_plugins();
+                    return IpcResponse::ok(json!({ "plugin_count": self.slots.len() }));
+                }
+                let Some(pid) = args.get("plugin_id").and_then(Value::as_u64) else {
+                    return IpcResponse::err("rack.remove requires 'plugin_id' or 'all': true");
+                };
+                self.remove_plugin(pid as u32);
+                IpcResponse::ok(json!({ "plugin_count": self.slots.len() }))
+            }
+            "rack.active" => {
+                let Some(pid) = args.get("plugin_id").and_then(Value::as_u64) else {
+                    return IpcResponse::err("rack.active requires 'plugin_id'");
+                };
+                let Some(active) = args.get("active").and_then(Value::as_bool) else {
+                    return IpcResponse::err("rack.active requires boolean 'active'");
+                };
+                self.set_plugin_active(pid as u32, active);
+                let cur = self
+                    .slots
+                    .get(pid as usize)
+                    .map(|s| s.active)
+                    .unwrap_or(false);
+                IpcResponse::ok(json!({ "plugin_id": pid, "active": cur }))
+            }
+            "rack.move" => {
+                let (Some(from), Some(to)) = (
+                    args.get("from").and_then(Value::as_u64),
+                    args.get("to").and_then(Value::as_u64),
+                ) else {
+                    return IpcResponse::err("rack.move requires 'from' and 'to'");
+                };
+                self.move_plugin(from as u32, to as u32);
+                IpcResponse::ok(json!({ "plugin_count": self.slots.len() }))
+            }
+            "rack.rename" => {
+                let (Some(pid), Some(name)) = (
+                    args.get("plugin_id").and_then(Value::as_u64),
+                    args.get("name").and_then(Value::as_str),
+                ) else {
+                    return IpcResponse::err("rack.rename requires 'plugin_id' and 'name'");
+                };
+                self.rename_plugin(pid as u32, name);
+                let cur = self
+                    .slots
+                    .get(pid as usize)
+                    .map(|s| s.info.name.clone())
+                    .unwrap_or_default();
+                IpcResponse::ok(json!({ "plugin_id": pid, "name": cur }))
+            }
+            "rack.category" => {
+                let (Some(pid), Some(cat)) = (
+                    args.get("plugin_id").and_then(Value::as_u64),
+                    args.get("category").and_then(Value::as_i64),
+                ) else {
+                    return IpcResponse::err("rack.category requires 'plugin_id' and 'category'");
+                };
+                self.set_plugin_category(pid as u32, cat as i32);
+                IpcResponse::ok(json!({ "plugin_id": pid, "category": cat }))
+            }
+            "patchbay.state" => {
+                let scene = self.patchbay.build_scene_dto();
+                IpcResponse::ok(json!({
+                    "external_patchbay": self.external_patchbay,
+                    "hide_unused_ports": self.patchbay.hide_unused_ports,
+                    "use_bezier": self.patchbay.use_bezier,
+                    "node_count": scene.boxes.len(),
+                    "connection_count": scene.connections.len(),
+                    "selected_plugin_ids": self.selected_patchbay_plugins,
+                    "scene": scene,
+                }))
+            }
+            "patchbay.refresh" => {
+                self.refresh_patchbay();
+                IpcResponse::ok(json!({ "groups": self.patchbay.groups.len() }))
+            }
+            "patchbay.arrange" => {
+                self.arrange_patchbay();
+                self.pending
+                    .ipc_ui_actions
+                    .push(("canvas.zoom".into(), "fit".into()));
+                IpcResponse::ok(json!({ "arranged": true }))
+            }
+            "patchbay.connect" => {
+                let (Some(go), Some(po), Some(gi), Some(pi)) = (
+                    args.get("group_out").and_then(Value::as_u64),
+                    args.get("port_out").and_then(Value::as_u64),
+                    args.get("group_in").and_then(Value::as_u64),
+                    args.get("port_in").and_then(Value::as_u64),
+                ) else {
+                    return IpcResponse::err(
+                        "patchbay.connect requires group_out, port_out, group_in, port_in",
+                    );
+                };
+                self.connect_patchbay_ports(go as u32, po as u32, gi as u32, pi as u32);
+                IpcResponse::ok(json!({ "connections": self.patchbay.connections.len() }))
+            }
+            "patchbay.disconnect" => {
+                let Some(cid) = args.get("connection_id").and_then(Value::as_u64) else {
+                    return IpcResponse::err("patchbay.disconnect requires 'connection_id'");
+                };
+                self.disconnect_patchbay_ports(cid as u32);
+                IpcResponse::ok(json!({ "connections": self.patchbay.connections.len() }))
+            }
+            "patchbay.select" => {
+                let csv = args.get("csv").and_then(Value::as_str).unwrap_or("");
+                self.apply_selected_boxes_csv(csv);
+                IpcResponse::ok(json!({
+                    "selected_plugin_ids": self.selected_patchbay_plugins,
+                }))
+            }
+            "patchbay.hide_unused" => {
+                let Some(hide) = args.get("enabled").and_then(Value::as_bool) else {
+                    return IpcResponse::err("patchbay.hide_unused requires boolean 'enabled'");
+                };
+                self.patchbay.hide_unused_ports = hide;
+                self.settings.canvas_hide_unused_ports = hide;
+                let _ = self.settings.save();
+                self.pending.patchbay_dirty = true;
+                IpcResponse::ok(json!({ "hide_unused_ports": hide }))
+            }
+            "patchbay.mode" => {
+                let external = match args.get("external").and_then(Value::as_bool) {
+                    Some(b) => b,
+                    None => match args.get("mode").and_then(Value::as_str) {
+                        Some("external") | Some("system") => true,
+                        Some("internal") | Some("plugin") => false,
+                        _ => {
+                            return IpcResponse::err(
+                                "patchbay.mode requires 'external' bool or 'mode' (internal|external)",
+                            );
+                        }
+                    },
+                };
+                self.switch_patchbay_view(external);
+                IpcResponse::ok(json!({ "external_patchbay": self.external_patchbay }))
+            }
+            "view.get" => IpcResponse::ok(json!({
+                "split_view": self.settings.split_view,
+                "split_view_ratio": self.settings.split_view_ratio,
+                "split_minimap_dock": self.settings.split_minimap_dock,
+                "show_toolbar": self.settings.show_toolbar,
+                "show_side_panel": self.settings.show_side_panel,
+                "show_meters": self.settings.show_meters,
+                "show_keyboard": self.settings.show_keyboard,
+                "show_logs": self.settings.show_logs,
+            })),
+            "view.set" => {
+                if let Some(v) = args.get("split_view").and_then(Value::as_bool) {
+                    self.settings.split_view = v;
+                }
+                if let Some(r) = args.get("split_view_ratio").and_then(Value::as_f64) {
+                    self.settings.split_view_ratio = (r as f32).clamp(0.25, 0.80);
+                }
+                if let Some(d) = args.get("split_minimap_dock").and_then(Value::as_i64) {
+                    self.settings.split_minimap_dock = (d as i32).clamp(0, 2);
+                }
+                if let Some(v) = args.get("show_toolbar").and_then(Value::as_bool) {
+                    self.settings.show_toolbar = v;
+                }
+                if let Some(v) = args.get("show_side_panel").and_then(Value::as_bool) {
+                    self.settings.show_side_panel = v;
+                }
+                if let Some(v) = args.get("show_meters").and_then(Value::as_bool) {
+                    self.settings.show_meters = v;
+                }
+                if let Some(v) = args.get("show_keyboard").and_then(Value::as_bool) {
+                    self.settings.show_keyboard = v;
+                }
+                if let Some(v) = args.get("show_logs").and_then(Value::as_bool) {
+                    self.settings.show_logs = v;
+                }
+                if let Some(tab) = args.get("tab").and_then(Value::as_str) {
+                    self.pending
+                        .ipc_ui_actions
+                        .push(("view.tab".into(), tab.to_string()));
+                }
+                let _ = self.settings.save();
+                IpcResponse::ok(json!({
+                    "split_view": self.settings.split_view,
+                    "split_view_ratio": self.settings.split_view_ratio,
+                    "split_minimap_dock": self.settings.split_minimap_dock,
+                }))
+            }
+            "canvas.zoom" => {
+                let mode = args
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .or_else(|| args.get("value").and_then(Value::as_f64).map(|v| v.to_string()))
+                    .unwrap_or_else(|| "reset".into());
+                self.pending
+                    .ipc_ui_actions
+                    .push(("canvas.zoom".into(), mode.clone()));
+                IpcResponse::ok(json!({ "zoom": mode }))
+            }
+            "canvas.search" => {
+                let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+                let close = args.get("close").and_then(Value::as_bool).unwrap_or(false);
+                if close {
+                    self.pending
+                        .ipc_ui_actions
+                        .push(("canvas.search.close".into(), String::new()));
+                } else {
+                    self.pending
+                        .ipc_ui_actions
+                        .push(("canvas.search".into(), query.to_string()));
+                }
+                IpcResponse::ok(json!({ "query": query, "closed": close }))
+            }
+            "settings.get" => {
+                let val = serde_json::to_value(&self.settings).unwrap_or_else(|_| json!({}));
+                if let Some(field) = args.get("field").and_then(Value::as_str) {
+                    match val.get(field) {
+                        Some(v) => IpcResponse::ok(json!({ "field": field, "value": v })),
+                        None => IpcResponse::err(format!("Unknown settings field: {field}")),
+                    }
+                } else {
+                    IpcResponse::ok(val)
+                }
+            }
+            "settings.set" => {
+                let Some(field) = args.get("field").and_then(Value::as_str) else {
+                    return IpcResponse::err("settings.set requires 'field'");
+                };
+                let Some(new_val) = args.get("value") else {
+                    return IpcResponse::err("settings.set requires 'value'");
+                };
+                let mut obj = serde_json::to_value(&self.settings).unwrap_or_else(|_| json!({}));
+                let Some(map) = obj.as_object_mut() else {
+                    return IpcResponse::err("Internal settings serialization error");
+                };
+                if !map.contains_key(field) {
+                    return IpcResponse::err(format!("Unknown settings field: {field}"));
+                }
+                map.insert(field.to_string(), new_val.clone());
+                match serde_json::from_value::<FrancaSettings>(obj) {
+                    Ok(updated) => {
+                        self.settings = updated;
+                        let _ = self.settings.save();
+                        self.patchbay.canvas_width = self.settings.canvas_width as f32;
+                        self.patchbay.canvas_height = self.settings.canvas_height as f32;
+                        self.patchbay.use_bezier = self.settings.canvas_use_bezier;
+                        self.patchbay.auto_hide_groups = self.settings.canvas_auto_hide_groups;
+                        self.patchbay.hide_unused_ports = self.settings.canvas_hide_unused_ports;
+                        self.pending.patchbay_dirty = true;
+                        IpcResponse::ok(json!({ "field": field, "value": new_val }))
+                    }
+                    Err(e) => IpcResponse::err(format!("Invalid value for '{field}': {e}")),
+                }
+            }
+            "project.new" => {
+                self.file_new();
+                if let Some(ref srv) = self.ipc_server {
+                    srv.update_registered_project(CARLA_VERSION_STRING, "");
+                }
+                IpcResponse::ok(json!({ "plugin_count": self.slots.len(), "project_dirty": self.project_dirty }))
+            }
+            "project.load" => {
+                let Some(path) = args.get("path").and_then(Value::as_str) else {
+                    return IpcResponse::err("project.load requires 'path'");
+                };
+                let ok = self.load_project(Path::new(path));
+                if ok {
+                    if let Some(ref srv) = self.ipc_server {
+                        srv.update_registered_project(CARLA_VERSION_STRING, path);
+                    }
+                    IpcResponse::ok(json!({
+                        "loaded": true,
+                        "plugin_count": self.slots.len(),
+                        "project_filename": path,
+                    }))
+                } else {
+                    IpcResponse::err(format!("Failed to load project: {path}"))
+                }
+            }
+            "project.save" => {
+                let target = args
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from)
+                    .or_else(|| self.project_filename.clone());
+                let Some(path) = target else {
+                    return IpcResponse::err("project.save requires 'path' when no project is open");
+                };
+                if self.save_project_to(&path) {
+                    let s = path.to_string_lossy().into_owned();
+                    if let Some(ref srv) = self.ipc_server {
+                        srv.update_registered_project(CARLA_VERSION_STRING, &s);
+                    }
+                    IpcResponse::ok(json!({ "saved": true, "path": s, "project_dirty": self.project_dirty }))
+                } else {
+                    IpcResponse::err(format!("Failed to save project: {}", path.display()))
+                }
+            }
+            "project.autosave" => {
+                let ok = self.perform_autosave();
+                IpcResponse::ok(json!({
+                    "autosaved": ok,
+                    "autosave_label": self.last_autosave_label,
+                    "project_filename": self.project_filename.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                }))
+            }
+            "history.undo" => {
+                self.perform_undo();
+                IpcResponse::ok(json!({
+                    "can_undo": self.history.can_undo(),
+                    "can_redo": self.history.can_redo(),
+                }))
+            }
+            "history.redo" => {
+                self.perform_redo();
+                IpcResponse::ok(json!({
+                    "can_undo": self.history.can_undo(),
+                    "can_redo": self.history.can_redo(),
+                }))
+            }
+            "window.geometry" => {
+                if let (Some(w), Some(h)) = (
+                    args.get("width").and_then(Value::as_i64),
+                    args.get("height").and_then(Value::as_i64),
+                ) {
+                    let ok = unsafe { franca_qt_resize_window(w as std::ffi::c_int, h as std::ffi::c_int) };
+                    if !ok {
+                        return IpcResponse::err("Failed to resize window");
+                    }
+                }
+                let mut w: std::ffi::c_int = 0;
+                let mut h: std::ffi::c_int = 0;
+                let ok = unsafe { franca_qt_get_window_size(&mut w, &mut h) };
+                if ok {
+                    IpcResponse::ok(json!({ "width": w, "height": h }))
+                } else {
+                    IpcResponse::err("Window not available")
+                }
+            }
+            "shot" => {
+                let Some(path) = args.get("path").and_then(Value::as_str) else {
+                    return IpcResponse::err("shot requires 'path'");
+                };
+                let target = args.get("target").and_then(Value::as_str).unwrap_or("window");
+                if target == "patchbay" {
+                    let scale = args.get("scale").and_then(Value::as_f64).unwrap_or(2.0) as f32;
+                    let p = Path::new(path);
+                    if let Some(parent) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    match self.patchbay.save_png(p, scale) {
+                        Ok(()) => {
+                            let bytes = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                            IpcResponse::ok(json!({ "path": path, "target": "patchbay", "bytes": bytes }))
+                        }
+                        Err(e) => IpcResponse::err(format!("Patchbay PNG save failed: {e}")),
+                    }
+                } else {
+                    let Ok(cpath) = std::ffi::CString::new(path) else {
+                        return IpcResponse::err("Invalid screenshot path");
+                    };
+                    let mut w: std::ffi::c_int = 0;
+                    let mut h: std::ffi::c_int = 0;
+                    let ok = unsafe { franca_qt_grab_window(cpath.as_ptr(), &mut w, &mut h) };
+                    if ok {
+                        let bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                        IpcResponse::ok(json!({
+                            "path": path,
+                            "target": "window",
+                            "width": w,
+                            "height": h,
+                            "bytes": bytes,
+                        }))
+                    } else {
+                        IpcResponse::err("Failed to grab Qt window screenshot")
+                    }
+                }
+            }
+            "quit" => {
+                // Programmatic quit skips unsaved/confirm-exit dialog via quit_signal_received
+                self.pending.quit_requested = true;
+                IpcResponse::ok(json!({ "quitting": true }))
+            }
+            other => IpcResponse::err(format!("Unknown IPC command: {other}")),
+        }
     }
 }

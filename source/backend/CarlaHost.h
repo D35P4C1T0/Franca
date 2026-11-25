@@ -511,6 +511,11 @@ CARLA_API_EXPORT bool carla_load_project(CarlaHostHandle handle, const char* fil
  */
 CARLA_API_EXPORT bool carla_save_project(CarlaHostHandle handle, const char* filename);
 
+/*!
+ * Save a copy of the current project to a file without updating the current project filename.
+ */
+CARLA_API_EXPORT bool carla_save_project_copy(CarlaHostHandle handle, const char* filename);
+
 #ifndef BUILD_BRIDGE
 /*!
   * Get the currently set project folder.

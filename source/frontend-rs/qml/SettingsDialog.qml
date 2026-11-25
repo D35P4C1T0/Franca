@@ -157,6 +157,27 @@ Controls.ApplicationWindow {
                             onToggled: win.mutateDraft(function(d) { d.confirm_exit = checked; })
                         }
                         Controls.CheckBox {
+                            text: qsTr("Enable rotating session autosaves (.autosaves/)")
+                            checked: win.draft.autosave_enabled !== false
+                            onToggled: win.mutateDraft(function(d) { d.autosave_enabled = checked; })
+                        }
+                        RowLayout {
+                            enabled: win.draft.autosave_enabled !== false
+                            spacing: 12
+                            Controls.Label { text: qsTr("Autosave interval (s):") }
+                            Controls.SpinBox {
+                                from: 15; to: 1800; stepSize: 15
+                                value: win.draft.autosave_interval_secs || 120
+                                onValueModified: win.mutateDraft(function(d) { d.autosave_interval_secs = value; })
+                            }
+                            Controls.Label { text: qsTr("Max backups:") }
+                            Controls.SpinBox {
+                                from: 1; to: 50
+                                value: win.draft.max_autosaves || 5
+                                onValueModified: win.mutateDraft(function(d) { d.max_autosaves = value; })
+                            }
+                        }
+                        Controls.CheckBox {
                             text: qsTr("Show Logs tab")
                             checked: !!win.draft.show_logs
                             onToggled: win.mutateDraft(function(d) { d.show_logs = checked; })
@@ -348,6 +369,11 @@ Controls.ApplicationWindow {
                             text: qsTr("Use curved Bezier cables")
                             checked: !!win.draft.canvas_use_bezier
                             onToggled: win.mutateDraft(function(d) { d.canvas_use_bezier = checked; })
+                        }
+                        Controls.CheckBox {
+                            text: qsTr("Hide unused patchbay ports by default")
+                            checked: !!win.draft.canvas_hide_unused_ports
+                            onToggled: win.mutateDraft(function(d) { d.canvas_hide_unused_ports = checked; })
                         }
                         Controls.CheckBox {
                             text: qsTr("Auto-hide empty groups")

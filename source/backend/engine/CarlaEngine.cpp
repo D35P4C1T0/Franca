@@ -581,7 +581,41 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
         }
 
         if (! File(bridgeBinary.buffer()).existsAsFile())
+        {
+           #if !defined(CARLA_OS_WIN) && !defined(CARLA_OS_MAC)
+            if (btype == BINARY_NATIVE)
+            {
+                const char* fallbackDirs[] = {
+                    "/usr/lib/franca",
+                    "/usr/lib64/franca",
+                    "/usr/local/lib/franca",
+                    "/usr/lib/carla",
+                    "/usr/lib64/carla",
+                    "/usr/local/lib/carla"
+                };
+                bool found = false;
+                for (size_t i = 0; i < sizeof(fallbackDirs)/sizeof(fallbackDirs[0]); ++i)
+                {
+                    String testBinary(fallbackDirs[i]);
+                    testBinary += CARLA_OS_SEP_STR "carla-bridge-native";
+                    if (File(testBinary.buffer()).existsAsFile())
+                    {
+                        bridgeBinary = testBinary;
+                        found = true;
+                        break;
+                    }
+                }
+                if (! found)
+                    bridgeBinary.clear();
+            }
+            else
+            {
+                bridgeBinary.clear();
+            }
+           #else
             bridgeBinary.clear();
+           #endif
+        }
     }
 
     const bool canBeBridged = ptype != PLUGIN_INTERNAL
@@ -592,9 +626,48 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
                            && ptype != PLUGIN_JSFX
                            && ptype != PLUGIN_JACK;
 
+    // Auto-bridge known crash-prone GLX/JUCE embedded-UI plugins (e.g. Cardinal, KV-Element)
+    auto pluginRequiresBridgeByDefault = [](const PluginType pt, const char* const fn, const char* const lbl) noexcept -> bool {
+        if (pt != PLUGIN_LV2 && pt != PLUGIN_VST2 && pt != PLUGIN_VST3 && pt != PLUGIN_CLAP)
+            return false;
+        auto hasToken = [](const char* const s, const char* const needle) noexcept -> bool {
+            if (s == nullptr || s[0] == '\0')
+                return false;
+            const size_t nlen = std::strlen(needle);
+            for (const char* p = s; *p != '\0'; ++p)
+            {
+                size_t i = 0;
+                while (i < nlen && p[i] != '\0')
+                {
+                    char a = p[i];
+                    char b = needle[i];
+                    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+                    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+                    if (a != b) break;
+                    ++i;
+                }
+                if (i == nlen)
+                    return true;
+            }
+            return false;
+        };
+        return hasToken(lbl, "cardinal.kx.studio")
+            || hasToken(fn, "cardinal")
+            || hasToken(lbl, "kushview.net/plugins/element")
+            || hasToken(fn, "kv-element");
+    };
+
     // Prefer bridges for some specific plugins
     bool preferBridges = pData->options.preferPluginBridges;
     const char* needsArchBridge = nullptr;
+
+    // Per-plugin overrides (allow choosing bridge vs in-process at add/load time)
+    if (options != PLUGIN_OPTIONS_NULL && (options & PLUGIN_OPTION_USE_BRIDGE) != 0)
+        preferBridges = true;
+    else if (options != PLUGIN_OPTIONS_NULL && (options & PLUGIN_OPTION_AVOID_BRIDGE) != 0)
+        preferBridges = false;
+    else if (canBeBridged && ! preferBridges && pluginRequiresBridgeByDefault(ptype, filename, label))
+        preferBridges = true;
 
    #ifdef CARLA_OS_MAC
     // Plugin might be in quarentine due to Apple stupid notarization rules, let's remove that if possible
@@ -778,6 +851,8 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
     if (plugin.get() == nullptr)
         return false;
 
+    if (options != PLUGIN_OPTIONS_NULL)
+        plugin->setBridgeOptions(options);
     plugin->reload();
 
    #ifdef SFZ_FILES_USING_SFIZZ
@@ -1115,12 +1190,13 @@ void CarlaEngine::touchPluginParameter(const uint, const uint32_t, const bool) n
 
 CarlaPluginPtr CarlaEngine::getPlugin(const uint id) const noexcept
 {
+    if (pData->curPluginCount == 0 || id >= pData->curPluginCount)
+        return nullptr;
+
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
     CARLA_SAFE_ASSERT_RETURN_ERRN(pData->plugins != nullptr, "Invalid engine internal data");
-    CARLA_SAFE_ASSERT_RETURN_ERRN(pData->curPluginCount != 0, "Invalid engine internal data");
 #endif
     CARLA_SAFE_ASSERT_RETURN_ERRN(pData->nextAction.opcode == kEnginePostActionNull, "Invalid engine internal data");
-    CARLA_SAFE_ASSERT_RETURN_ERRN(id < pData->curPluginCount, "Invalid plugin Id");
 
     return pData->plugins[id].plugin;
 }
@@ -1444,6 +1520,22 @@ bool CarlaEngine::saveProject(const char* const filename, const bool setAsCurren
         return false;
     }
 
+    // Ensure the destination directory exists (important for nested .autosaves/ paths).
+    const File parentDir(file.getParentDirectory());
+    if (parentDir != File() && ! parentDir.exists())
+        parentDir.createDirectory();
+
+    // Serialize and write atomically before updating currentProjectFilename so
+    // a failed save never corrupts engine session state.
+    MemoryOutputStream out;
+    saveProjectInternal(out);
+
+    if (! file.replaceWithData(out.getData(), out.getDataSize()))
+    {
+        setLastError("Failed to write file");
+        return false;
+    }
+
     if (setAsCurrentProject)
     {
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
@@ -1467,14 +1559,7 @@ bool CarlaEngine::saveProject(const char* const filename, const bool setAsCurren
 #endif
     }
 
-    MemoryOutputStream out;
-    saveProjectInternal(out);
-
-    if (file.replaceWithData(out.getData(), out.getDataSize()))
-        return true;
-
-    setLastError("Failed to write file");
-    return false;
+    return true;
 }
 
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
@@ -3119,8 +3204,13 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
             }
            #endif
 
-            if (!isPreset && canBeBridged && hasFilenameOrLabel && validFilename && entry->btype != BINARY_NONE &&
-                (entry->btype != BINARY_NATIVE || pData->options.preferPluginBridges))
+            bool wantsBridge = entry->btype != BINARY_NATIVE || pData->options.preferPluginBridges;
+            if ((entry->stateSave.options & PLUGIN_OPTION_USE_BRIDGE) != 0)
+                wantsBridge = true;
+            else if ((entry->stateSave.options & PLUGIN_OPTION_AVOID_BRIDGE) != 0)
+                wantsBridge = false;
+
+            if (!isPreset && canBeBridged && hasFilenameOrLabel && validFilename && entry->btype != BINARY_NONE && wantsBridge)
             {
                 entry->bridgeBinary = resolveBridgeBinaryForType(entry->btype);
                 if (entry->bridgeBinary.isNotEmpty())

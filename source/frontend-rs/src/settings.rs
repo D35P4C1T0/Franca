@@ -42,6 +42,9 @@ pub struct FrancaSettings {
     pub show_logs: bool,
     pub experimental: bool,
     pub dark_theme: bool,
+    pub autosave_enabled: bool,
+    pub autosave_interval_secs: u32,
+    pub max_autosaves: u32,
 
     // Canvas
     pub canvas_theme: String,
@@ -52,6 +55,7 @@ pub struct FrancaSettings {
     pub canvas_auto_select_items: bool,
     pub canvas_eye_candy: bool,
     pub canvas_inline_displays: bool,
+    pub canvas_hide_unused_ports: bool,
 
     // Engine
     pub audio_driver: String,
@@ -111,6 +115,9 @@ pub struct FrancaSettings {
     pub show_side_panel: bool,
     pub show_meters: bool,
     pub show_keyboard: bool,
+    pub split_view: bool,
+    pub split_view_ratio: f32,
+    pub split_minimap_dock: i32,
     pub disk_folders: Vec<String>,
     pub favorite_plugins: HashSet<String>,
 }
@@ -235,6 +242,9 @@ impl Default for FrancaSettings {
             show_logs: true,
             experimental: false,
             dark_theme: true,
+            autosave_enabled: true,
+            autosave_interval_secs: crate::session::DEFAULT_AUTOSAVE_INTERVAL_SECS,
+            max_autosaves: crate::session::DEFAULT_MAX_AUTOSAVES,
 
             canvas_theme: "Modern Dark".into(),
             canvas_width: 3100,
@@ -244,6 +254,7 @@ impl Default for FrancaSettings {
             canvas_auto_select_items: false,
             canvas_eye_candy: true,
             canvas_inline_displays: false,
+            canvas_hide_unused_ports: false,
 
             audio_driver: driver,
             process_mode,
@@ -297,6 +308,9 @@ impl Default for FrancaSettings {
             show_side_panel: false,
             show_meters: false,
             show_keyboard: false,
+            split_view: false,
+            split_view_ratio: 0.65,
+            split_minimap_dock: 2,
             disk_folders: Vec::new(),
             favorite_plugins: HashSet::new(),
         }
@@ -326,11 +340,8 @@ impl FrancaSettings {
 
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(&path, json).map_err(|e| e.to_string())
+        crate::session::write_file_atomic(&path, json.as_bytes())
     }
 
     pub fn driver_config(&self, driver: &str) -> DriverDeviceSettings {

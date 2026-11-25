@@ -1030,6 +1030,16 @@ bool carla_save_project(CarlaHostHandle handle, const char* filename)
     return handle->engine->saveProject(filename, true);
 }
 
+bool carla_save_project_copy(CarlaHostHandle handle, const char* filename)
+{
+    CARLA_SAFE_ASSERT_RETURN(filename != nullptr && filename[0] != '\0', false);
+    CARLA_SAFE_ASSERT_WITH_LAST_ERROR_RETURN(handle->engine != nullptr, "Engine is not initialized", false);
+
+    carla_debug("carla_save_project_copy(%p, \"%s\")", handle, filename);
+
+    return handle->engine->saveProject(filename, false);
+}
+
 #ifndef BUILD_BRIDGE
 const char* carla_get_current_project_folder(CarlaHostHandle handle)
 {
@@ -2018,6 +2028,12 @@ const CarlaInlineDisplayImageSurface* carla_render_inline_display(CarlaHostHandl
 
     if (const CarlaPluginPtr plugin = handle->engine->getPlugin(pluginId))
     {
+        if (plugin->getHints() & CB::PLUGIN_IS_BRIDGE)
+            return nullptr;
+
+        if (! (plugin->getHints() & CB::PLUGIN_HAS_INLINE_DISPLAY))
+            return nullptr;
+
         switch (plugin->getType())
         {
 #if !(defined(BUILD_BRIDGE_ALTERNATIVE_ARCH) || defined(CARLA_PLUGIN_ONLY_BRIDGE))

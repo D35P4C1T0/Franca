@@ -482,6 +482,12 @@ public:
     virtual void setOption(uint option, bool yesNo, bool sendCallback);
 
     /*!
+     * Store per-plugin bridge mode hints, used to decide and remember
+     * whether the plugin runs in-process or through a bridge.
+     */
+    void setBridgeOptions(uint options) noexcept;
+
+    /*!
      * Enable or disable the plugin according to @a yesNo.
      * When a plugin is disabled, it will never be processed or managed in any way.
      *
