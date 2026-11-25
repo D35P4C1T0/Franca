@@ -230,7 +230,11 @@ public:
         for (; runMainLoopOnce() && ! gCloseBridge;)
         {
             gIdle();
-           #if defined(CARLA_OS_MAC) || defined(CARLA_OS_WIN)
+           #if defined(CARLA_OS_WIN) && defined(BUILDING_CARLA_FOR_WINE)
+            // Window messages can wake the bridge before the next shared-memory poll.
+            if (::MsgWaitForMultipleObjectsEx(0, nullptr, 5, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_FAILED)
+                d_msleep(5);
+           #elif defined(CARLA_OS_MAC) || defined(CARLA_OS_WIN)
             // MacOS and Win32 have event-loops to run, so minimize sleep time
             d_msleep(1);
            #else
