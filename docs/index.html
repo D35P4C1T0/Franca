@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Franca — Focused Audio Plugin Host</title>
+  <meta
+    name="description"
+    content="Franca is a focused, slimmer fork of Carla with a native Rust + KDE Kirigami/Qt 6 interface for Linux audio plugin hosting."
+  />
+  <link rel="icon" type="image/png" href="assets/franca.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body id="top">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top">
+        <img src="assets/franca.png" alt="Franca icon" />
+        <span>Franca</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#why">Why Franca</a>
+        <a href="#interface">Interface</a>
+        <a href="#usage">Usage</a>
+        <a href="#download">Build</a>
+        <a href="https://github.com/D35P4C1T0/Franca" target="_blank" rel="noopener">GitHub</a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">Light</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="breadcrumb">
+      <span>D35P4C1T0</span>
+      <span class="sep">/</span>
+      <span>Applications</span>
+      <span class="sep">/</span>
+      <span>Franca</span>
+    </div>
+
+    <!-- Hero / Overview -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-top">
+        <img class="hero-icon" src="assets/franca.png" alt="Franca logo" />
+        <div>
+          <h1 id="hero-title">Franca</h1>
+          <p class="hero-subtitle">
+            A focused, slimmer fork of <a href="https://kx.studio/Applications:Carla" target="_blank" rel="noopener">Carla</a>
+            that keeps its audio engine and plugin bridges while introducing a fast, native
+            <strong>Rust + KDE Kirigami / Qt 6</strong> desktop interface.
+          </p>
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#download">Build from Source</a>
+        <a class="btn btn-secondary" href="https://github.com/D35P4C1T0/Franca" target="_blank" rel="noopener">
+          View on GitHub
+        </a>
+        <a class="btn btn-secondary" href="#why">Why This Fork?</a>
+      </div>
+
+      <div class="meta-strip">
+        <div class="meta-item">
+          <span class="meta-label">Frontend</span>
+          <span class="meta-value">Rust + Qt 6 / Kirigami</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Audio Engine</span>
+          <span class="meta-value">Carla (PipeWire / JACK)</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Plugin Formats</span>
+          <span class="meta-value">LV2, VST3, VST2, CLAP, LADSPA, DSSI, SF2/SFZ</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Compatibility</span>
+          <span class="meta-value">.carxp &amp; .carxs projects</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Core Capabilities (inspired by Carla's processing modes overview) -->
+    <section id="overview" aria-labelledby="overview-title">
+      <h2 class="section-heading" id="overview-title">What Franca Does</h2>
+      <p class="section-lead">
+        Franca hosts native Linux and Wine-bridged audio plugins in a clean desktop workspace designed to sit
+        naturally alongside your PipeWire or JACK audio graph.
+      </p>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>Continuous Rack <span class="badge">Stereo</span></h3>
+          <p>
+            Arrange effects from top to bottom with drag-to-reorder, clean audio pass-through on bypass,
+            category color coding, inline parameter editing, and per-plugin peak &amp; 0&nbsp;dB clip meters.
+          </p>
+        </article>
+
+        <article class="card">
+          <h3>Modular Patchbay <span class="badge">PipeWire / JACK</span></h3>
+          <p>
+            Connect your rack directly to hardware inputs, playback sinks, or a system-wide virtual microphone
+            using a crisp canvas with left-to-right auto-arrange, port drag highlights, minimap, and undo/redo.
+          </p>
+        </article>
+
+        <article class="card">
+          <h3>Native &amp; Wine Bridges <span class="badge">64-bit / 32-bit</span></h3>
+          <p>
+            Retains Carla's plugin bridges for LV2, VST3, VST2, CLAP, LADSPA, DSSI, JSFX, SF2/SF3, SFZ, and
+            Windows plugins via Wine, hardened against third-party static destructor crashes on exit.
+          </p>
+        </article>
+
+        <article class="card">
+          <h3>Drop-in Project Continuity <span class="badge">.carxp</span></h3>
+          <p>
+            Reads and writes standard Carla projects (<code>.carxp</code>) and presets (<code>.carxs</code>),
+            reusing the Carla settings namespace and default JACK client name so your existing routes carry over.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Why This Fork Exists -->
+    <section id="why" aria-labelledby="why-title">
+      <h2 class="section-heading" id="why-title">Why This Fork Exists</h2>
+      <p class="section-lead">
+        Carla is a remarkable piece of Linux audio software, but in day-to-day use it didn't quite fit what I
+        needed. Franca exists for four straightforward reasons:
+      </p>
+
+      <div class="reasons-grid">
+        <article class="reason-card">
+          <span class="reason-num">01</span>
+          <h3>Crashes &amp; General Slowness</h3>
+          <p>
+            I ran into frequent crashes and noticeable UI sluggishness with upstream Carla. Moving the
+            interface to a compiled Rust + Qt&nbsp;6 / Kirigami frontend and fixing shutdown/engine lifecycle bugs
+            makes everyday operation noticeably snappier and more predictable.
+          </p>
+        </article>
+
+        <article class="reason-card">
+          <span class="reason-num">02</span>
+          <h3>Didn't Fit the Desktop Environment</h3>
+          <p>
+            Carla's custom dark skin felt disconnected from the rest of the desktop. Franca embraces native
+            KDE Plasma / Breeze styling through Kirigami and Qt&nbsp;6 so it blends in cleanly with the rest of
+            your system theme, fonts, and dialogs.
+          </p>
+        </article>
+
+        <article class="reason-card">
+          <span class="reason-num">03</span>
+          <h3>Plugin Crashes &amp; Segfaults</h3>
+          <p>
+            Certain third-party plugins caused Carla or its bridges to segfault—especially during teardown or
+            scanning. Franca adds bridge exit hardening, bounded rotating session logs, and safe recovery when
+            opening projects with missing plugins.
+          </p>
+        </article>
+
+        <article class="reason-card">
+          <span class="reason-num">04</span>
+          <h3>A Focused, Slimmer Scope</h3>
+          <p>
+            My use case was much simpler than everything Carla aims to provide. <strong>Franca is not a
+            substitute for Carla</strong>—if you want a full modular studio or remote OSC host, use Carla.
+            Franca is a slimmer, focused tool for running a reliable rack and routing it cleanly.
+          </p>
+        </article>
+      </div>
+
+      <div class="callout">
+        <strong>Standing on upstream's shoulders:</strong> Franca is built directly on
+        <a href="https://github.com/falkTX/Carla" target="_blank" rel="noopener">Carla</a> by falkTX and
+        remains licensed under the GNU GPL v2+. Your existing <code>.carxp</code> projects stay compatible.
+      </div>
+    </section>
+
+    <!-- The Interface -->
+    <section id="interface" aria-labelledby="interface-title">
+      <h2 class="section-heading" id="interface-title">The Interface</h2>
+      <p class="section-lead">
+        A native Qt&nbsp;6 / Kirigami layout organized around three focused views: the Rack, the Patchbay, and
+        the bounded session Log.
+      </p>
+
+      <div class="tabs" role="tablist" aria-label="Interface views">
+        <button class="tab-btn" role="tab" aria-selected="true" data-tab="rack" type="button">Rack</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="patchbay" type="button">Patchbay</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="logs" type="button">Logs</button>
+      </div>
+
+      <div class="window-mock" aria-live="polite">
+        <div class="window-titlebar">
+          <div class="window-title-left">
+            <img src="assets/franca.png" alt="" />
+            <span>Franca — voice-chain.carxp</span>
+          </div>
+          <div class="window-dots" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="window-toolbar">
+          <div class="toolbar-group">
+            <span class="mock-chip">+ Add Plugin</span>
+            <span class="mock-chip">Undo</span>
+            <span class="mock-chip">Redo</span>
+          </div>
+          <div class="toolbar-group">
+            <span class="mock-chip active" id="mock-mode-label">Rack View</span>
+          </div>
+        </div>
+
+        <!-- Rack Tab -->
+        <div class="tab-panel active" id="panel-rack" role="tabpanel">
+          <div class="rack-list">
+            <div class="rack-row">
+              <div class="cat-bar cat-filter"></div>
+              <div class="power-dot" title="Active"></div>
+              <div class="plugin-info">
+                <span class="plugin-name">RNNoise Suppressor</span>
+                <span class="plugin-meta">LV2 · Filter · Stereo</span>
+              </div>
+              <div class="plugin-btns">
+                <span class="plugin-btn">Edit</span>
+                <span class="plugin-btn">UI</span>
+              </div>
+              <div class="meters">
+                <div class="meter-track"><div class="meter-fill" style="width: 58%;"></div></div>
+                <div class="meter-track"><div class="meter-fill" style="width: 54%;"></div></div>
+              </div>
+            </div>
+
+            <div class="rack-row">
+              <div class="cat-bar cat-eq"></div>
+              <div class="power-dot" title="Active"></div>
+              <div class="plugin-info">
+                <span class="plugin-name">LSP Parametric Equalizer x8</span>
+                <span class="plugin-meta">LV2 · EQ · Stereo</span>
+              </div>
+              <div class="plugin-btns">
+                <span class="plugin-btn">Edit</span>
+                <span class="plugin-btn">UI</span>
+              </div>
+              <div class="meters">
+                <div class="meter-track"><div class="meter-fill" style="width: 66%;"></div></div>
+                <div class="meter-track"><div class="meter-fill" style="width: 63%;"></div></div>
+              </div>
+            </div>
+
+            <div class="rack-row">
+              <div class="cat-bar cat-dyn"></div>
+              <div class="power-dot" title="Active"></div>
+              <div class="plugin-info">
+                <span class="plugin-name">TDR Kotelnikov</span>
+                <span class="plugin-meta">VST3 (Wine Bridge) · Dynamics · Stereo</span>
+              </div>
+              <div class="plugin-btns">
+                <span class="plugin-btn">Edit</span>
+                <span class="plugin-btn">UI</span>
+              </div>
+              <div class="meters">
+                <div class="meter-track"><div class="meter-fill" style="width: 74%;"></div></div>
+                <div class="meter-track"><div class="meter-fill" style="width: 72%;"></div></div>
+              </div>
+            </div>
+
+            <div class="rack-row bypassed">
+              <div class="cat-bar cat-reverb"></div>
+              <div class="power-dot" title="Bypassed"></div>
+              <div class="plugin-info">
+                <span class="plugin-name">Dragonfly Room Reverb</span>
+                <span class="plugin-meta">LV2 · Reverb · Bypassed (audio passes through)</span>
+              </div>
+              <div class="plugin-btns">
+                <span class="plugin-btn">Edit</span>
+                <span class="plugin-btn">UI</span>
+              </div>
+              <div class="meters">
+                <div class="meter-track"><div class="meter-fill" style="width: 0%;"></div></div>
+                <div class="meter-track"><div class="meter-fill" style="width: 0%;"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Patchbay Tab -->
+        <div class="tab-panel" id="panel-patchbay" role="tabpanel">
+          <div class="patchbay-wrap">
+            <svg viewBox="0 0 860 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Franca patchbay routing diagram">
+              <defs>
+                <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <path d="M 24 0 L 0 0 0 24" fill="none" stroke="rgba(255,255,255,0.035)" stroke-width="1" />
+                </pattern>
+              </defs>
+              <rect width="860" height="270" fill="url(#grid)" />
+
+              <!-- Cables -->
+              <path d="M 220 96 C 280 96, 290 96, 340 96" fill="none" stroke="#1ce6a8" stroke-width="2.5" opacity="0.9" />
+              <path d="M 220 126 C 280 126, 290 126, 340 126" fill="none" stroke="#1ce6a8" stroke-width="2.5" opacity="0.9" />
+              <path d="M 520 96 C 580 96, 590 78, 640 78" fill="none" stroke="#3daee9" stroke-width="2.5" opacity="0.9" />
+              <path d="M 520 126 C 580 126, 590 108, 640 108" fill="none" stroke="#3daee9" stroke-width="2.5" opacity="0.9" />
+              <path d="M 520 96 C 585 96, 585 186, 640 186" fill="none" stroke="#1ce6a8" stroke-width="2" stroke-dasharray="5 4" opacity="0.65" />
+
+              <!-- Node 1: USB Audio Capture -->
+              <g transform="translate(40, 52)">
+                <rect width="180" height="102" rx="8" fill="#1a2130" stroke="rgba(255,255,255,0.14)" />
+                <rect width="180" height="28" rx="8" fill="#232c40" />
+                <text x="12" y="19" fill="#eef3fa" font-size="12" font-weight="600" font-family="sans-serif">USB Audio Capture</text>
+                <text x="98" y="49" fill="#9fb0c9" font-size="11" font-family="monospace">capture_FL</text>
+                <circle cx="180" cy="44" r="5" fill="#1ce6a8" />
+                <text x="98" y="79" fill="#9fb0c9" font-size="11" font-family="monospace">capture_FR</text>
+                <circle cx="180" cy="74" r="5" fill="#1ce6a8" />
+              </g>
+
+              <!-- Node 2: Franca Rack -->
+              <g transform="translate(340, 52)">
+                <rect width="180" height="102" rx="8" fill="#1a2130" stroke="rgba(28,230,168,0.45)" stroke-width="1.3" />
+                <rect width="180" height="28" rx="8" fill="#173235" />
+                <text x="12" y="19" fill="#c9ffec" font-size="12" font-weight="600" font-family="sans-serif">Franca Rack</text>
+                <circle cx="0" cy="44" r="5" fill="#1ce6a8" />
+                <text x="12" y="49" fill="#cfd8e8" font-size="11" font-family="monospace">in_1</text>
+                <text x="134" y="49" fill="#cfd8e8" font-size="11" font-family="monospace">out_1</text>
+                <circle cx="180" cy="44" r="5" fill="#3daee9" />
+                <circle cx="0" cy="74" r="5" fill="#1ce6a8" />
+                <text x="12" y="79" fill="#cfd8e8" font-size="11" font-family="monospace">in_2</text>
+                <text x="134" y="79" fill="#cfd8e8" font-size="11" font-family="monospace">out_2</text>
+                <circle cx="180" cy="74" r="5" fill="#3daee9" />
+              </g>
+
+              <!-- Node 3: Virtual Microphone -->
+              <g transform="translate(640, 34)">
+                <rect width="180" height="100" rx="8" fill="#1a2130" stroke="rgba(255,255,255,0.14)" />
+                <rect width="180" height="28" rx="8" fill="#232c40" />
+                <text x="12" y="19" fill="#eef3fa" font-size="12" font-weight="600" font-family="sans-serif">Virtual Mic Sink</text>
+                <circle cx="0" cy="44" r="5" fill="#3daee9" />
+                <text x="12" y="49" fill="#9fb0c9" font-size="11" font-family="monospace">playback_FL</text>
+                <circle cx="0" cy="74" r="5" fill="#3daee9" />
+                <text x="12" y="79" fill="#9fb0c9" font-size="11" font-family="monospace">playback_FR</text>
+              </g>
+
+              <!-- Node 4: Headphones Monitor -->
+              <g transform="translate(640, 150)">
+                <rect width="180" height="72" rx="8" fill="#1a2130" stroke="rgba(255,255,255,0.12)" />
+                <rect width="180" height="28" rx="8" fill="#232c40" />
+                <text x="12" y="19" fill="#eef3fa" font-size="12" font-weight="600" font-family="sans-serif">Monitor Out</text>
+                <circle cx="0" cy="46" r="5" fill="#1ce6a8" />
+                <text x="12" y="51" fill="#9fb0c9" font-size="11" font-family="monospace">monitor_FL</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div class="tab-panel" id="panel-logs" role="tabpanel">
+          <div class="log-box">
+            <div><span class="log-ts">[11:42:08.114]</span> <span class="log-ok">INFO</span>  Engine initialized (driver=JACK/PipeWire, 48000 Hz, 256 frames)</div>
+            <div><span class="log-ts">[11:42:08.342]</span> <span class="log-ok">INFO</span>  Loaded project voice-chain.carxp (4 plugins, Continuous Rack)</div>
+            <div><span class="log-ts">[11:42:08.501]</span> <span class="log-ok">INFO</span>  Wine 64-bit bridge ready for TDR Kotelnikov (VST3)</div>
+            <div><span class="log-ts">[11:42:08.618]</span> <span class="log-warn">WARN</span>  Dragonfly Room Reverb started bypassed — pass-through active</div>
+            <div><span class="log-ts">[11:42:08.702]</span> <span class="log-ok">INFO</span>  Patchbay synced: 5 connections restored, session log rotating at 2 MiB</div>
+          </div>
+        </div>
+
+        <div class="window-statusbar">
+          <span>Engine: JACK (PipeWire) · 48000 Hz · 256 samples · 0 XRUNs</span>
+          <span class="dsp-meter">
+            <span>DSP</span>
+            <span class="dsp-bar"><span></span></span>
+            <span>3.4%</span>
+          </span>
+        </div>
+      </div>
+
+      <p class="interface-notes">
+        Native Rust UI (<code>franca-ui</code>) is used by default when built; the legacy Python/Qt frontend
+        remains available via <code>FRANCA_LEGACY_UI=1</code>.
+      </p>
+    </section>
+
+    <!-- Usage -->
+    <section id="usage" aria-labelledby="usage-title">
+      <h2 class="section-heading" id="usage-title">Usage</h2>
+      <p class="section-lead">
+        Getting from a fresh install to a working PipeWire/JACK effects rack takes only a few steps.
+      </p>
+
+      <ol class="steps">
+        <li class="step">
+          <span class="step-index">1</span>
+          <h3>Scan Plugins</h3>
+          <p>
+            Configure your plugin paths in Settings, then open <strong>Add Plugin → Refresh</strong> to index
+            native Linux and optional Wine plugins.
+          </p>
+        </li>
+        <li class="step">
+          <span class="step-index">2</span>
+          <h3>Build Your Rack</h3>
+          <p>
+            Add effects, drag rows to reorder, toggle bypass without cutting audio, and monitor per-plugin
+            levels and clipping.
+          </p>
+        </li>
+        <li class="step">
+          <span class="step-index">3</span>
+          <h3>Route in Patchbay</h3>
+          <p>
+            Wire inputs and outputs across your PipeWire/JACK graph (such as a virtual microphone) with
+            auto-arrange and undo/redo.
+          </p>
+        </li>
+        <li class="step">
+          <span class="step-index">4</span>
+          <h3>Save &amp; Recover Safely</h3>
+          <p>
+            Save standard <code>.carxp</code> projects. If a project opens with missing plugins, save a
+            recovered copy under a new name to preserve the original.
+          </p>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Build & Download -->
+    <section id="download" aria-labelledby="download-title">
+      <h2 class="section-heading" id="download-title">Build &amp; Download</h2>
+      <p class="section-lead">
+        Franca targets Arch Linux with Qt&nbsp;6, KDE Kirigami, Rust/Cargo, and a standard C/C++ toolchain.
+        Run <code>make features</code> first to verify detected audio drivers and plugin formats.
+      </p>
+
+      <h3 class="sub-heading">1. Clone &amp; Build (Backend + Rust/Qt 6 UI)</h3>
+      <div class="code-block">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>git clone https://github.com/D35P4C1T0/Franca.git
+cd Franca
+make -j"$(nproc)"
+make rust-ui</code></pre>
+      </div>
+
+      <h3 class="sub-heading">2. Optional: 64-bit Wine Plugin Bridge</h3>
+      <div class="code-block">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>make -j"$(nproc)" win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ AR=x86_64-w64-mingw32-ar
+make wine64</code></pre>
+      </div>
+
+      <h3 class="sub-heading">3. Install &amp; Run</h3>
+      <div class="code-block">
+        <button class="copy-btn" type="button">Copy</button>
+        <pre><code>make install PREFIX="$HOME/.local"
+pw-jack "$HOME/.local/bin/franca" project.carxp</code></pre>
+      </div>
+
+      <div class="links-row">
+        <a class="link-pill" href="https://github.com/D35P4C1T0/Franca" target="_blank" rel="noopener">Project Page</a>
+        <a class="link-pill" href="https://github.com/D35P4C1T0/Franca/archive/refs/heads/main.zip" target="_blank" rel="noopener">Source Code (ZIP)</a>
+        <a class="link-pill" href="https://github.com/D35P4C1T0/Franca/issues" target="_blank" rel="noopener">Bug Reports</a>
+        <a class="link-pill" href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md" target="_blank" rel="noopener">INSTALL.md</a>
+        <a class="link-pill" href="https://github.com/falkTX/Carla" target="_blank" rel="noopener">Upstream Carla</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Franca — GPL-2.0-or-later · Forked from <a href="https://kx.studio/Applications:Carla" target="_blank" rel="noopener">Carla</a> by falkTX</span>
+    <div class="footer-links">
+      <a href="#top">Top</a>
+      <a href="#why">Why Franca</a>
+      <a href="#interface">Interface</a>
+      <a href="#usage">Usage</a>
+      <a href="#download">Build</a>
+    </div>
+  </footer>
+
+  <script>
+    // Interface view tabs
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const panels = {
+      rack: document.getElementById('panel-rack'),
+      patchbay: document.getElementById('panel-patchbay'),
+      logs: document.getElementById('panel-logs')
+    };
+    const modeLabels = {
+      rack: 'Rack View',
+      patchbay: 'Patchbay View',
+      logs: 'Session Logs'
+    };
+    const modeLabelEl = document.getElementById('mock-mode-label');
+
+    tabBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.tab;
+        tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
+        Object.entries(panels).forEach(([k, el]) => el.classList.toggle('active', k === key));
+        if (modeLabelEl) modeLabelEl.textContent = modeLabels[key] || '';
+      });
+    });
+
+    // Copy buttons for build commands
+    document.querySelectorAll('.copy-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const code = btn.parentElement.querySelector('code')?.textContent || '';
+        try {
+          await navigator.clipboard.writeText(code);
+          btn.textContent = 'Copied';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        } catch {
+          btn.textContent = 'Failed';
+        }
+      });
+    });
+
+    // Theme toggle (dark default matching Franca icon)
+    const toggle = document.getElementById('theme-toggle');
+    const root = document.documentElement;
+    const saved = localStorage.getItem('franca-theme');
+    if (saved === 'light') {
+      root.setAttribute('data-theme', 'light');
+      toggle.textContent = 'Dark';
+    }
+    toggle.addEventListener('click', () => {
+      const isLight = root.getAttribute('data-theme') === 'light';
+      if (isLight) {
+        root.removeAttribute('data-theme');
+        localStorage.setItem('franca-theme', 'dark');
+        toggle.textContent = 'Light';
+      } else {
+        root.setAttribute('data-theme', 'light');
+        localStorage.setItem('franca-theme', 'light');
+        toggle.textContent = 'Dark';
+      }
+    });
+  </script>
+</body>
+</html>
