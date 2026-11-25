@@ -3,190 +3,514 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Franca — Audio Plugin Host</title>
+  <title>Franca — Rack-based audio plugin host for Linux</title>
   <meta
     name="description"
-    content="Franca is a focused, slimmer fork of Carla with a native Rust and Qt 6 / KDE Kirigami interface."
+    content="Franca is an open-source, rack-based audio plugin host for Linux, forked from Carla, for systemwide audio processing over PipeWire and JACK."
   />
   <link rel="icon" type="image/png" href="assets/franca.png" />
   <link rel="stylesheet" href="style.css" />
+  <script>
+    (function () {
+      var saved = localStorage.getItem('franca-theme');
+      if (saved === 'light' || saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+    })();
+  </script>
 </head>
 <body id="top">
-  <header>
-    <div class="wrap header-row">
+  <a class="skip-link" href="#content">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container nav-bar">
       <a class="brand" href="#top">
-        <img src="assets/franca.png" alt="Franca icon" />
+        <img src="assets/franca.png" alt="" width="22" height="22" />
         <span>Franca</span>
       </a>
-      <nav aria-label="Section links">
-        <a href="#why">Why this fork</a>
-        <a href="#interface">The Interface</a>
-        <a href="#usage">Usage</a>
-        <a href="#download">Download &amp; Build</a>
-        <a href="https://github.com/D35P4C1T0/Franca">GitHub</a>
-      </nav>
+
+      <div class="nav-group">
+        <nav aria-label="Primary">
+          <ul class="nav-links">
+            <li><a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">Documentation</a></li>
+            <li><a href="https://github.com/D35P4C1T0/Franca">Source</a></li>
+            <li><a href="#install">Downloads</a></li>
+          </ul>
+        </nav>
+
+        <button class="theme-btn" id="theme-toggle" type="button" aria-label="Switch colour theme">
+          <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
+          <span id="theme-label">Theme</span>
+        </button>
+      </div>
     </div>
   </header>
 
-  <main class="wrap">
-    <div class="intro">
-      <div class="title-row">
-        <img src="assets/franca.png" alt="Franca logo" />
+  <main id="content">
+    <!-- Introduction -->
+    <section class="intro" aria-labelledby="project-title">
+      <div class="container intro-grid">
         <div>
-          <h1>Franca</h1>
-          <p class="tagline">A focused, slimmer fork of <a href="https://kx.studio/Applications:Carla">Carla</a> for Linux.</p>
+          <div class="title-lockup">
+            <h1 id="project-title">Franca</h1>
+            <span class="version-tag" title="Current development version">
+              <span class="led" aria-hidden="true"></span>
+              v2.6.0-alpha1
+            </span>
+          </div>
+
+          <p class="lead">
+            A rack-based audio plugin host for Linux. Load your plugins, arrange a signal chain and process
+            system audio through PipeWire or JACK without running a DAW.
+          </p>
+          <p class="lead-sub">
+            Forked from <a href="https://github.com/falkTX/Carla">Carla</a>, keeping its audio engine and
+            plugin bridges while introducing a native Rust and Qt&nbsp;6 / KDE Kirigami interface.
+          </p>
+
+          <div class="actions">
+            <a class="btn-primary" href="#install">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              Build from source
+            </a>
+            <a class="link-secondary" href="https://github.com/D35P4C1T0/Franca">Source code on GitHub</a>
+          </div>
+        </div>
+
+        <dl class="spec-list" aria-label="Technical specifications">
+          <div class="spec-row">
+            <dt>Platform</dt>
+            <dd>Linux (Arch / KDE Plasma)</dd>
+          </div>
+          <div class="spec-row">
+            <dt>Interface</dt>
+            <dd>Rust + Qt 6 / Kirigami</dd>
+          </div>
+          <div class="spec-row">
+            <dt>Routing</dt>
+            <dd>PipeWire / JACK, ALSA, Pulse</dd>
+          </div>
+          <div class="spec-row">
+            <dt>Formats</dt>
+            <dd>LV2, VST3, VST2, CLAP, LADSPA, DSSI, JSFX, SF2/SFZ</dd>
+          </div>
+          <div class="spec-row">
+            <dt>Projects</dt>
+            <dd>.carxp &amp; .carxs compatible</dd>
+          </div>
+          <div class="spec-row">
+            <dt>Licence</dt>
+            <dd>GPL-2.0-or-later</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <!-- Primary Application Screenshot -->
+    <section class="figure-section" aria-label="Application screenshot">
+      <div class="container">
+        <figure>
+          <div class="screenshot-frame">
+            <img
+              src="assets/rack.png"
+              alt="Franca Rack view running a five-plugin processing chain: Gate, 5-Band EQ, Compressor, Air-G Clip and Output Gain"
+              width="1120"
+              height="680"
+            />
+          </div>
+          <figcaption>
+            <span class="fig-id">FIG. 01 — THE PLUGIN RACK</span>
+            <span>CONTINUOUS STEREO CHAIN · LV2 / VST3 / INTERNAL · 44.1 kHz / 512 SAMPLES</span>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- Capabilities & Signal Flow -->
+    <section class="section" id="features" aria-labelledby="features-heading">
+      <div class="container split">
+        <div class="split-aside">
+          <h2 id="features-heading">Architecture &amp; capabilities</h2>
+          <p>
+            Built around two views — a top-to-bottom stereo rack for processing and a modular patchbay for
+            wiring into the rest of the system audio graph.
+          </p>
+        </div>
+
+        <div class="split-body split-body--wide">
+          <!-- Technical Signal Flow Diagram -->
+          <div class="diagram-block">
+            <figure>
+              <div class="diagram-surface">
+                <svg class="diagram-svg" viewBox="0 0 760 116" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Signal flow diagram: System capture flows through Gate, 5-Band EQ, Compressor, Clipper and Output Gain to a virtual microphone or playback output">
+                  <!-- Calibration baseline ticks -->
+                  <line x1="8" y1="16" x2="752" y2="16" stroke="var(--rule-strong)" stroke-width="0.75" stroke-dasharray="2 4" />
+                  <text x="8" y="11" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9" letter-spacing="0.06em">INPUT</text>
+                  <text x="150" y="11" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9" letter-spacing="0.06em">CONTINUOUS RACK (STEREO)</text>
+                  <text x="646" y="11" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9" letter-spacing="0.06em">OUTPUT</text>
+
+                  <!-- Signal path wires -->
+                  <g stroke="var(--text-secondary)" stroke-width="1.25" fill="none">
+                    <line x1="118" y1="62" x2="148" y2="62" />
+                    <line x1="234" y1="62" x2="256" y2="62" />
+                    <line x1="342" y1="62" x2="364" y2="62" />
+                    <line x1="464" y1="62" x2="486" y2="62" />
+                    <line x1="572" y1="62" x2="594" y2="62" />
+                    <line x1="612" y1="62" x2="642" y2="62" stroke="var(--accent)" />
+                  </g>
+
+                  <!-- Arrowheads -->
+                  <g fill="var(--text-secondary)">
+                    <polygon points="148,62 142,58.5 142,65.5" />
+                    <polygon points="256,62 250,58.5 250,65.5" />
+                    <polygon points="364,62 358,58.5 358,65.5" />
+                    <polygon points="486,62 480,58.5 480,65.5" />
+                    <polygon points="594,62 588,58.5 588,65.5" />
+                  </g>
+                  <polygon points="642,62 636,58.5 636,65.5" fill="var(--accent)" />
+
+                  <!-- Source Node -->
+                  <rect x="8" y="38" width="110" height="48" rx="2" fill="var(--bg)" stroke="var(--rule-strong)" stroke-width="1" />
+                  <text x="18" y="57" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">System audio</text>
+                  <text x="18" y="73" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9.5">CAPTURE / APP</text>
+
+                  <!-- Rack container bracket (8px horizontal padding on both sides) -->
+                  <rect x="148" y="28" width="472" height="72" rx="2" fill="none" stroke="var(--rule-strong)" stroke-width="1" stroke-dasharray="3 3" />
+
+                  <!-- Slot 01: Gate -->
+                  <rect x="156" y="40" width="78" height="44" rx="2" fill="var(--bg)" stroke="var(--rule-strong)" stroke-width="1" />
+                  <text x="165" y="55" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9">01</text>
+                  <text x="165" y="72" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">Gate</text>
+
+                  <!-- Slot 02: EQ -->
+                  <rect x="256" y="40" width="86" height="44" rx="2" fill="var(--bg)" stroke="var(--rule-strong)" stroke-width="1" />
+                  <text x="265" y="55" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9">02</text>
+                  <text x="265" y="72" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">Equalizer</text>
+
+                  <!-- Slot 03: Compressor -->
+                  <rect x="364" y="40" width="100" height="44" rx="2" fill="var(--bg)" stroke="var(--rule-strong)" stroke-width="1" />
+                  <text x="373" y="55" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9">03</text>
+                  <text x="373" y="72" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">Compressor</text>
+
+                  <!-- Slot 04: Limiter / Clipper -->
+                  <rect x="486" y="40" width="86" height="44" rx="2" fill="var(--bg)" stroke="var(--rule-strong)" stroke-width="1" />
+                  <text x="495" y="55" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9">04</text>
+                  <text x="495" y="72" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">Limiter</text>
+
+                  <!-- Output Gain indicator node -->
+                  <circle cx="603" cy="62" r="9" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.25" />
+                  <text x="603" y="65" text-anchor="middle" fill="var(--accent)" font-family="IBM Plex Mono, monospace" font-size="9" font-weight="500">dB</text>
+
+                  <!-- Output Node -->
+                  <rect x="642" y="38" width="110" height="48" rx="2" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.25" />
+                  <text x="652" y="57" fill="var(--text)" font-family="IBM Plex Sans, sans-serif" font-size="11.5" font-weight="500">Virtual mic</text>
+                  <text x="652" y="73" fill="var(--text-secondary)" font-family="IBM Plex Mono, monospace" font-size="9.5">OR PLAYBACK</text>
+                </svg>
+              </div>
+              <figcaption>
+                <span class="fig-id">FIG. 02 — SYSTEMWIDE SIGNAL FLOW</span>
+                <span>BYPASSED SLOTS PASS AUDIO CLEANLY THROUGH THE CHAIN</span>
+              </figcaption>
+            </figure>
+          </div>
+
+          <!-- Horizontal feature rows -->
+          <div class="feature-rows">
+            <div class="feature-row">
+              <span class="feature-index">01</span>
+              <h3>Rack-based signal chain</h3>
+              <p>
+                Plugins run top to bottom in a continuous stereo rack. Reorder slots by dragging, toggle
+                bypass without cutting audio, inspect per-plugin peak meters with 0&nbsp;dB clip warnings,
+                and open parameter editors or native plugin GUIs directly from each row.
+              </p>
+            </div>
+
+            <div class="feature-row">
+              <span class="feature-index">02</span>
+              <h3>Systemwide audio routing</h3>
+              <p>
+                The patchbay tab exposes your PipeWire or JACK graph alongside the rack so you can route a
+                hardware microphone into a virtual microphone sink or process desktop playback. Includes
+                left-to-right auto-arrange, zoom/fit controls and undo/redo for cable edits.
+              </p>
+            </div>
+
+            <div class="feature-row">
+              <span class="feature-index">03</span>
+              <h3>Native &amp; Wine plugins</h3>
+              <p>
+                Supports native Linux LV2, VST3, VST2, CLAP, LADSPA, DSSI, JSFX, SF2/SF3, SFZ and Carla's
+                internal plugins. Optional 64-bit and 32-bit Wine bridges host Windows plugins alongside
+                native ones, with exit-handling fixes for third-party static destructor crashes.
+              </p>
+            </div>
+
+            <div class="feature-row">
+              <span class="feature-index">04</span>
+              <h3>Native KDE Plasma UI</h3>
+              <p>
+                The default <code>franca-ui</code> frontend is written in Rust and Qt&nbsp;6 / Kirigami so
+                it follows your desktop theme, font rendering and file dialogs. A bounded rotating session
+                log tab captures warnings and bridge output without getting in the way.
+              </p>
+            </div>
+
+            <div class="feature-row">
+              <span class="feature-index">05</span>
+              <h3>Carla project compatibility</h3>
+              <p>
+                Opens and saves standard <code>.carxp</code> projects and <code>.carxs</code> presets.
+                Franca shares Carla's settings namespace and default JACK client name so existing plugin
+                search paths, devices and routes carry over.
+              </p>
+            </div>
+          </div>
+
+          <!-- Second real screenshot: Patchbay -->
+          <figure class="secondary-figure">
+            <div class="screenshot-frame">
+              <img
+                src="assets/patchbay.png"
+                alt="Franca Patchbay view showing Carla audio/MIDI ports, Capture inputs and Playback outputs on the canvas"
+                width="1120"
+                height="680"
+              />
+            </div>
+            <figcaption>
+              <span class="fig-id">FIG. 03 — PATCHBAY CANVAS</span>
+              <span>NODE ROUTING · AUTO-FIT · UNDO / REDO</span>
+            </figcaption>
+          </figure>
         </div>
       </div>
-
-      <p>
-        Franca keeps Carla's audio engine and plugin bridges (LV2, VST3, VST2, CLAP, LADSPA, DSSI, JSFX,
-        SF2/SF3, SFZ, and optional Wine bridges) and pairs them with a native Rust + Qt&nbsp;6 / KDE Kirigami
-        interface built for everyday PipeWire/JACK rack hosting.
-      </p>
-
-      <dl class="specs">
-        <dt>Frontend</dt>
-        <dd>Rust + Qt 6 / KDE Kirigami (<code>franca-ui</code>)</dd>
-        <dt>Audio driver</dt>
-        <dd>JACK / PipeWire (plus ALSA, PulseAudio, Dummy)</dd>
-        <dt>Compatibility</dt>
-        <dd>Reads and writes <code>.carxp</code> projects and <code>.carxs</code> presets</dd>
-        <dt>License</dt>
-        <dd><a href="https://github.com/D35P4C1T0/Franca/blob/main/doc/GPL.txt">GPL-2.0-or-later</a></dd>
-      </dl>
-
-      <div class="quick-links">
-        <a href="#download">Build from source</a>
-        <a href="https://github.com/D35P4C1T0/Franca">Repository</a>
-        <a href="https://github.com/D35P4C1T0/Franca/issues">Issues</a>
-      </div>
-    </div>
-
-    <section id="why">
-      <h2>Why this fork exists</h2>
-      <p>
-        Carla is a great project, but using it day to day exposed a few issues that pushed me to build a
-        smaller, more tailored fork:
-      </p>
-      <ul>
-        <li>
-          <strong>Crashes and general slowness.</strong> Upstream Carla crashed often enough and felt sluggish
-          in everyday use. Moving the UI to Rust + Qt&nbsp;6 and fixing engine/shutdown edge cases keeps it
-          responsive and predictable.
-        </li>
-        <li>
-          <strong>UI didn't fit the desktop environment.</strong> Carla's custom look felt out of place on KDE
-          Plasma. Franca uses native Qt&nbsp;6 / Kirigami styling so it blends in with the rest of the desktop.
-        </li>
-        <li>
-          <strong>Plugin crashes and segfaults.</strong> Certain plugins caused Carla or its bridges to
-          segfault (including exit crashes from third-party static destructors). Franca includes bridge
-          hardening, rotating session logs, and safe project recovery when plugins are missing.
-        </li>
-        <li>
-          <strong>A much simpler use case.</strong> Carla tries to cover a huge surface area. Franca is
-          <em>not</em> a substitute for Carla—it is a focused, slimmer version meant for hosting a rack of
-          plugins and wiring them into PipeWire/JACK without extra clutter.
-        </li>
-      </ul>
-      <p class="muted">
-        All credit for the audio engine and plugin hosting foundation goes to falkTX and
-        <a href="https://github.com/falkTX/Carla">upstream Carla</a>.
-      </p>
     </section>
 
-    <section id="interface">
-      <h2>The Interface</h2>
-      <p>
-        Franca uses your desktop's native Qt&nbsp;6 / Breeze theme and splits the workspace into three tabs:
-        <strong>Rack</strong>, <strong>Patchbay</strong>, and <strong>Logs</strong>.
-      </p>
+    <!-- Installation -->
+    <section class="section" id="install" aria-labelledby="install-heading">
+      <div class="container split">
+        <div class="split-aside">
+          <h2 id="install-heading">Installation</h2>
+          <p>
+            Built from source on Arch Linux. Requires a C/C++ toolchain, Make, pkg-config, Qt&nbsp;6, KDE
+            Kirigami and Rust/Cargo.
+          </p>
+        </div>
 
-      <figure>
-        <img src="assets/rack.png" alt="Franca Rack view showing a chain of LV2, VST3, and internal plugins" />
-        <figcaption>
-          <strong>Rack view</strong> — top-to-bottom stereo effect chain with drag-to-reorder, bypass
-          pass-through, per-plugin peak meters, and inline parameter/UI controls.
-        </figcaption>
-      </figure>
-
-      <figure>
-        <img src="assets/patchbay.png" alt="Franca Patchbay view showing audio and MIDI nodes on the canvas" />
-        <figcaption>
-          <strong>Patchbay view</strong> — connect the rack to hardware inputs, playback sinks, or a
-          system-wide virtual microphone, with auto-arrange and undo/redo.
-        </figcaption>
-      </figure>
-
-      <p class="muted">
-        The third tab, <strong>Logs</strong>, records bounded rotating session output so plugin warnings and
-        bridge errors stay easy to inspect without getting in the way.
-      </p>
-    </section>
-
-    <section id="usage">
-      <h2>Usage</h2>
-      <ol>
-        <li>
-          <strong>Scan your plugins.</strong> Set your plugin folders in Settings, then click
-          <em>Add Plugin → Refresh</em> to scan LV2, VST3, VST2, CLAP, LADSPA, DSSI, SF2/SFZ, and Wine plugins.
-        </li>
-        <li>
-          <strong>Build a rack.</strong> Add effects, drag rows to reorder them, and toggle plugins on or off
-          (bypassed plugins pass audio cleanly through the continuous rack).
-        </li>
-        <li>
-          <strong>Wire the patchbay.</strong> Open the <em>Patchbay</em> tab to connect your rack to your
-          PipeWire/JACK graph (for example, hardware mic → rack → virtual microphone).
-        </li>
-        <li>
-          <strong>Reuse existing Carla projects.</strong> Open <code>.carxp</code> projects and
-          <code>.carxs</code> presets directly. Franca shares Carla's settings namespace and default JACK
-          client name so existing routes carry over.
-        </li>
-      </ol>
-    </section>
-
-    <section id="download">
-      <h2>Download &amp; Build</h2>
-      <p>
-        Franca targets Arch Linux with a C/C++ toolchain, Make, Rust/Cargo, Qt&nbsp;6, and KDE Kirigami.
-        Run <code>make features</code> to check which audio drivers and plugin formats are detected.
-      </p>
-
-      <h3>Build backend and native Rust/Qt 6 UI</h3>
-      <pre><code>git clone https://github.com/D35P4C1T0/Franca.git
+        <div class="split-body">
+          <div class="install-step">
+            <div class="step-header">
+              <span class="step-label">01 / Build backend &amp; native UI</span>
+              <span class="step-note">Run <code>make features</code> first to inspect detected formats</span>
+            </div>
+            <div class="code-wrap">
+              <button class="copy-btn" type="button" aria-label="Copy build commands">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
+              <pre><code>git clone https://github.com/D35P4C1T0/Franca.git
 cd Franca
 make -j"$(nproc)"
 make rust-ui</code></pre>
+            </div>
+          </div>
 
-      <h3>Optional: 64-bit Wine plugin bridge</h3>
-      <pre><code>make -j"$(nproc)" win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ AR=x86_64-w64-mingw32-ar
+          <div class="install-step">
+            <div class="step-header">
+              <span class="step-label">02 / Optional 64-bit Wine bridge</span>
+              <span class="step-note">Requires MinGW-w64 and Wine (<code>winegcc</code>)</span>
+            </div>
+            <div class="code-wrap">
+              <button class="copy-btn" type="button" aria-label="Copy Wine bridge commands">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
+              <pre><code>make -j"$(nproc)" win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ AR=x86_64-w64-mingw32-ar
 make wine64</code></pre>
+            </div>
+          </div>
 
-      <h3>Install and run</h3>
-      <pre><code>make install PREFIX="$HOME/.local"
+          <div class="install-step">
+            <div class="step-header">
+              <span class="step-label">03 / Install &amp; launch</span>
+              <span class="step-note">Use <code>pw-jack</code> to select PipeWire's JACK library explicitly</span>
+            </div>
+            <div class="code-wrap">
+              <button class="copy-btn" type="button" aria-label="Copy install commands">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
+              <pre><code>make install PREFIX="$HOME/.local"
 pw-jack "$HOME/.local/bin/franca" project.carxp</code></pre>
+            </div>
+          </div>
 
-      <p class="muted">
-        See <a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">INSTALL.md</a> for full
-        dependency and Wine setup details. Source archive:
-        <a href="https://github.com/D35P4C1T0/Franca/archive/refs/heads/main.zip">main.zip</a>.
-      </p>
+          <div class="install-meta">
+            <p>
+              Full dependency list, smoke test (<code>make check-franca</code>) and Wine bridge notes are
+              documented in <a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">INSTALL.md</a>.
+            </p>
+            <p>
+              No prebuilt binary releases yet — clone <code>main</code> or download the
+              <a href="https://github.com/D35P4C1T0/Franca/archive/refs/heads/main.zip">source archive (ZIP)</a>.
+              The fallback Python/Qt UI remains selectable with <code>FRANCA_LEGACY_UI=1</code>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- About the Project -->
+    <section class="section" id="about" aria-labelledby="about-heading">
+      <div class="container split">
+        <div class="split-aside">
+          <h2 id="about-heading">About this fork</h2>
+          <p>Why Franca exists, how it differs from upstream Carla and where credit is due.</p>
+        </div>
+
+        <div class="split-body prose">
+          <p>
+            Carla is the foundation this project stands on, and for a full modular studio environment it
+            remains the right tool. Franca started because my own day-to-day setup was much narrower and
+            kept running into friction:
+          </p>
+
+          <ul class="reason-list">
+            <li>
+              <span class="reason-marker">01</span>
+              <div>
+                <strong>Crashes and sluggishness.</strong>
+                <span class="reason-text">
+                  Upstream Carla crashed frequently in my setup and felt slow during normal interaction.
+                  Rewriting the frontend in Rust with Qt&nbsp;6 and fixing engine shutdown edge cases made
+                  routine use steadier and quicker.
+                </span>
+              </div>
+            </li>
+            <li>
+              <span class="reason-marker">02</span>
+              <div>
+                <strong>Visual mismatch with the desktop.</strong>
+                <span class="reason-text">
+                  The custom skin never fit alongside native KDE Plasma applications. Franca delegates
+                  appearance to Qt&nbsp;6 and Kirigami so it matches the rest of the desktop environment.
+                </span>
+              </div>
+            </li>
+            <li>
+              <span class="reason-marker">03</span>
+              <div>
+                <strong>Plugin segfaults.</strong>
+                <span class="reason-text">
+                  Specific plugins caused crashes and segfaults, particularly during bridge teardown.
+                  Franca hardens bridge exit paths, writes bounded rotating session logs and prompts to save
+                  a recovered copy when a project opens with missing plugins.
+                </span>
+              </div>
+            </li>
+            <li>
+              <span class="reason-marker">04</span>
+              <div>
+                <strong>A smaller, more focused scope.</strong>
+                <span class="reason-text">
+                  Franca is not meant to replace Carla. If you need remote OSC control, multi-client JACK
+                  sessions or a plugin-in-plugin host, use Carla. Franca is a slimmer host focused on
+                  running a reliable effect rack and wiring it into PipeWire/JACK.
+                </span>
+              </div>
+            </li>
+          </ul>
+
+          <div class="acknowledgement">
+            <p>
+              Franca is a fork of <a href="https://github.com/falkTX/Carla">Carla</a> by Filipe Coelho
+              (falkTX) and the KXStudio contributors. It retains Carla's audio engine, plugin bridges and
+              <a href="https://github.com/D35P4C1T0/Franca/blob/main/doc/GPL.txt">GNU General Public
+              License, version 2 or later</a>. Bug reports and patches are welcome on the
+              <a href="https://github.com/D35P4C1T0/Franca/issues">GitHub issue tracker</a>.
+            </p>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 
-  <footer>
-    <div class="wrap footer-row">
-      <span>Franca · GPL-2.0-or-later · Fork of <a href="https://kx.studio/Applications:Carla">Carla</a></span>
-      <div class="footer-links">
-        <a href="#top">Top</a>
-        <a href="#why">Why this fork</a>
-        <a href="#interface">Interface</a>
-        <a href="#usage">Usage</a>
-        <a href="#download">Build</a>
-      </div>
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <span class="footer-id">FRANCA · GPL-2.0-OR-LATER · FORKED FROM CARLA</span>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/D35P4C1T0/Franca">Repository</a>
+        <a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">Documentation</a>
+        <a href="https://github.com/D35P4C1T0/Franca/issues">Issues</a>
+        <a href="https://github.com/D35P4C1T0/Franca/blob/main/doc/GPL.txt">Licence</a>
+        <a href="https://kx.studio/Applications:Carla">Upstream Carla</a>
+      </nav>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      // Theme toggle (respects system default until toggled)
+      var root = document.documentElement;
+      var btn = document.getElementById('theme-toggle');
+      var label = document.getElementById('theme-label');
+      var icon = document.getElementById('theme-icon');
+      var sunSvg = '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>';
+      var moonSvg = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>';
+
+      function activeTheme() {
+        var attr = root.getAttribute('data-theme');
+        if (attr === 'light' || attr === 'dark') return attr;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+
+      function syncLabel() {
+        var current = activeTheme();
+        var next = current === 'dark' ? 'light' : 'dark';
+        label.textContent = next === 'light' ? 'Light' : 'Dark';
+        icon.innerHTML = next === 'light' ? sunSvg : moonSvg;
+        btn.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+      }
+
+      syncLabel();
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncLabel);
+
+      btn.addEventListener('click', function () {
+        var next = activeTheme() === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        localStorage.setItem('franca-theme', next);
+        syncLabel();
+      });
+
+      // Copy-to-clipboard for installation blocks
+      document.querySelectorAll('.copy-btn').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var code = button.parentElement.querySelector('code');
+          if (!code || !navigator.clipboard) return;
+          var span = button.querySelector('span');
+          navigator.clipboard.writeText(code.textContent).then(function () {
+            button.classList.add('copied');
+            span.textContent = 'Copied';
+            setTimeout(function () {
+              button.classList.remove('copied');
+              span.textContent = 'Copy';
+            }, 1500);
+          });
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
