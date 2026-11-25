@@ -1019,45 +1019,42 @@ impl FrancaCore {
     }
 
     pub fn load_project(&mut self, path: &Path) -> bool {
-        if !self.engine_running {
+        if !self.engine_running || self.is_project_loading {
             return false;
         }
-        let prev_filename = self.project_filename.clone();
-        let prev_dirty = self.project_dirty;
+        let Some(ref host) = self.host else { return false };
         self.is_project_loading = true;
-        let path_str = path.to_string_lossy().into_owned();
-        let res = self.host.as_ref().map(|h| {
-            let ok = h.load_project(&path_str);
-            h.finish_cancelable_ui();
-            (ok, h.get_last_error())
-        });
-        let mut loaded_ok = false;
-        if let Some((ok, err)) = res {
-            if !ok {
-                self.is_project_loading = false;
-                // Failed load guard: keep current session filename & dirty flag intact
-                self.project_filename = prev_filename;
-                self.project_dirty = prev_dirty;
+        self.removing_all_plugins = false;
+        let path_str = path.to_string_lossy();
+        let result = host.open_project(&path_str);
+        host.finish_cancelable_ui();
+        self.drain_engine_events();
+        self.is_project_loading = false;
+        self.history.set_blocked(false);
+
+        let loaded_ok = result.is_ok();
+        if loaded_ok || matches!(result, Err((true, _))) {
+            self.history.clear();
+            self.project_filename = Some(path.to_path_buf());
+            self.project_dirty = !loaded_ok;
+            self.last_autosave = Instant::now();
+            self.last_autosave_label.clear();
+            mark_session_clean();
+            if let Some(ref srv) = self.ipc_server {
+                srv.update_registered_project(CARLA_VERSION_STRING, &path_str);
+            }
+            self.pending.rack_dirty = true;
+            self.pending.patchbay_dirty = true;
+        }
+        match result {
+            Ok(()) => logging::log_ui(&format!("Loaded project: {path_str}")),
+            Err((_, err)) => {
                 logging::log_error(&format!("Failed to load project {path_str}: {err}"));
                 self.pending
                     .alerts
                     .push(("Load Project Failed".into(), format!("Could not load project:\n{err}")));
-            } else {
-                loaded_ok = true;
-                self.history.clear();
-                self.project_filename = Some(path.to_path_buf());
-                self.project_dirty = false;
-                self.last_autosave = Instant::now();
-                self.last_autosave_label.clear();
-                mark_session_clean();
-                logging::log_ui(&format!("Loaded project: {path_str}"));
             }
         }
-        self.drain_engine_events();
-        self.is_project_loading = false;
-        self.history.set_blocked(false);
-        self.pending.rack_dirty = true;
-        self.pending.patchbay_dirty = true;
         loaded_ok
     }
 
@@ -3224,9 +3221,6 @@ impl FrancaCore {
                 };
                 let ok = self.load_project(Path::new(path));
                 if ok {
-                    if let Some(ref srv) = self.ipc_server {
-                        srv.update_registered_project(CARLA_VERSION_STRING, path);
-                    }
                     IpcResponse::ok(json!({
                         "loaded": true,
                         "plugin_count": self.slots.len(),

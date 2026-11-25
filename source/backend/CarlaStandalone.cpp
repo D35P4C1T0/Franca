@@ -1020,6 +1020,15 @@ bool carla_load_project(CarlaHostHandle handle, const char* filename)
     return handle->engine->loadProject(filename, true);
 }
 
+bool carla_open_project(CarlaHostHandle handle, const char* filename, bool* rackReplaced)
+{
+    CARLA_SAFE_ASSERT_RETURN(rackReplaced != nullptr, false);
+    *rackReplaced = false;
+    CARLA_SAFE_ASSERT_WITH_LAST_ERROR_RETURN(handle->engine != nullptr, "Engine is not initialized", false);
+
+    return handle->engine->loadProject(filename, true, rackReplaced);
+}
+
 bool carla_save_project(CarlaHostHandle handle, const char* filename)
 {
     CARLA_SAFE_ASSERT_RETURN(filename != nullptr && filename[0] != '\0', false);

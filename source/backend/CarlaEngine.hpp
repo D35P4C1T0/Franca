@@ -1049,9 +1049,9 @@ public:
 
     /*!
      * Load a project file.
-     * @note Already loaded plugins are not removed; call removeAllPlugins() first if needed.
+     * If rackReplaced is provided, replace the rack after parsing and report whether it changed.
      */
-    bool loadProject(const char* filename, bool setAsCurrentProject);
+    bool loadProject(const char* filename, bool setAsCurrentProject, bool* rackReplaced = nullptr);
 
     /*!
      * Save current project to a file.
@@ -1345,7 +1345,7 @@ public:
      * Common load project function for main engine and plugin.
      */
     bool loadProjectInternal(water::XmlDocument& xmlDoc, bool alwaysLoadConnections,
-                             const char* projectFilename = nullptr);
+                             const char* projectFilename = nullptr, bool* rackReplaced = nullptr);
 
 protected:
     // -------------------------------------------------------------------
@@ -1358,6 +1358,8 @@ protected:
     EngineEvent* getInternalEventBuffer(bool isInput) const noexcept;
 
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
+    void setCurrentProjectFilename(const char* filename);
+
     // -------------------------------------------------------------------
     // Patchbay stuff
 

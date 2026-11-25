@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-from ctypes import CDLL, CFUNCTYPE, c_bool, c_char_p, c_int, c_void_p
+from ctypes import CDLL, CFUNCTYPE, POINTER, byref, c_bool, c_char_p, c_int, c_void_p
 from os import fsdecode, fsencode
 from pathlib import Path
 from platform import machine
@@ -79,6 +79,52 @@ class ProjectTests(TestCase):
         self.assertEqual(self.project.read_bytes(), original)
         self.assertTrue(self.host.save_project(str(self.project.with_name("recovered.carxp"))),
                         self.host.get_last_error())
+
+    def open_project(self, path):
+        open_project = self.host.lib.carla_open_project
+        open_project.argtypes = (c_void_p, c_char_p, POINTER(c_bool))
+        open_project.restype = c_bool
+        replaced = c_bool()
+        loaded = open_project(self.host.handle, fsencode(path), byref(replaced))
+        return loaded, replaced.value
+
+    def test_open_project_replaces_rack(self):
+        self.save_rack()
+        self.assertEqual(self.open_project(self.project), (True, True))
+
+        project = ElementTree.parse(self.project)
+        project.getroot().remove(project.find("Plugin"))
+        second = self.project.with_name("second.carxp")
+        project.write(second, encoding="utf-8")
+        for _ in range(2):
+            self.assertEqual(self.open_project(second), (True, True))
+            self.assertEqual(self.host.get_current_plugin_count(), 1)
+            self.assertEqual(self.host.get_plugin_info(0)["name"], "Output gain")
+
+        empty = self.project.with_name("empty.carxp")
+        empty.write_text('<CARLA-PROJECT VERSION="2.6"/>', encoding="utf-8")
+        self.assertEqual(self.open_project(empty), (True, True))
+        self.assertEqual(self.host.get_current_plugin_count(), 0)
+
+    def test_open_project_failure_reports_rack_replacement(self):
+        self.save_rack()
+        self.assertEqual(self.open_project(self.project), (True, True))
+
+        broken = self.project.with_name("broken.carxp")
+        broken.write_text('<CARLA-PROJECT VERSION="2.6"><Plugin>', encoding="utf-8")
+        self.assertEqual(self.open_project(broken), (False, False))
+        self.assertEqual(self.host.get_current_plugin_count(), 2)
+
+        partial = self.project.with_name("partial.carxp")
+        project = ElementTree.parse(self.project)
+        project.find("Plugin/Info/Label").text = "unavailable-plugin"
+        project.write(partial, encoding="utf-8")
+        original = partial.read_bytes()
+        self.assertEqual(self.open_project(partial), (False, True))
+        self.assertEqual(self.host.get_current_plugin_count(), 1)
+        self.assertEqual(self.host.get_plugin_info(0)["name"], "Output gain")
+        self.assertFalse(self.host.save_project(str(partial)))
+        self.assertEqual(partial.read_bytes(), original)
 
 
 class DiscoveryTests(TestCase):

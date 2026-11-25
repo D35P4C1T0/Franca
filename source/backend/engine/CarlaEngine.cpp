@@ -1466,8 +1466,12 @@ bool CarlaEngine::loadFile(const char* const filename)
     return false;
 }
 
-bool CarlaEngine::loadProject(const char* const filename, const bool setAsCurrentProject)
+bool CarlaEngine::loadProject(const char* const filename, const bool setAsCurrentProject,
+                              bool* const rackReplaced)
 {
+    if (rackReplaced != nullptr)
+        *rackReplaced = false;
+
     CARLA_SAFE_ASSERT_RETURN_ERR(pData->isIdling == 0, "An operation is still being processed, please wait for it to finish");
     CARLA_SAFE_ASSERT_RETURN_ERR(filename != nullptr && filename[0] != '\0', "Invalid filename");
     carla_debug("CarlaEngine::loadProject(\"%s\")", filename);
@@ -1475,33 +1479,15 @@ bool CarlaEngine::loadProject(const char* const filename, const bool setAsCurren
     const File file(filename);
     CARLA_SAFE_ASSERT_RETURN_ERR(file.existsAsFile(), "Requested file does not exist or is not a readable file");
 
-    if (setAsCurrentProject)
-    {
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
-        if (pData->currentProjectFilename != filename)
-        {
-            pData->currentProjectFilename = filename;
-
-            bool found;
-            const size_t r = pData->currentProjectFilename.rfind(CARLA_OS_SEP, &found);
-
-            if (found)
-            {
-                pData->currentProjectFolder = filename;
-                pData->currentProjectFolder[r] = '\0';
-            }
-            else
-            {
-                pData->currentProjectFolder.clear();
-            }
-        }
+    if (setAsCurrentProject && rackReplaced == nullptr)
+        setCurrentProjectFilename(filename);
 #endif
-    }
 
     // An idle callback can process a save request before the load returns.
     pData->projectsWithLoadErrors.insert(file);
     XmlDocument xml(file);
-    if (!loadProjectInternal(xml, !setAsCurrentProject, filename))
+    if (!loadProjectInternal(xml, !setAsCurrentProject, filename, rackReplaced))
         return false;
 
     pData->projectsWithLoadErrors.erase(file);
@@ -1536,33 +1522,34 @@ bool CarlaEngine::saveProject(const char* const filename, const bool setAsCurren
         return false;
     }
 
-    if (setAsCurrentProject)
-    {
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
-        if (pData->currentProjectFilename != filename)
-        {
-            pData->currentProjectFilename = filename;
-
-            bool found;
-            const size_t r = pData->currentProjectFilename.rfind(CARLA_OS_SEP, &found);
-
-            if (found)
-            {
-                pData->currentProjectFolder = filename;
-                pData->currentProjectFolder[r] = '\0';
-            }
-            else
-            {
-                pData->currentProjectFolder.clear();
-            }
-        }
+    if (setAsCurrentProject)
+        setCurrentProjectFilename(filename);
 #endif
-    }
 
     return true;
 }
 
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
+void CarlaEngine::setCurrentProjectFilename(const char* const filename)
+{
+    if (pData->currentProjectFilename == filename)
+        return;
+
+    pData->currentProjectFilename = filename;
+    bool found;
+    const size_t separator = pData->currentProjectFilename.rfind(CARLA_OS_SEP, &found);
+    if (found)
+    {
+        pData->currentProjectFolder = filename;
+        pData->currentProjectFolder[separator] = '\0';
+    }
+    else
+    {
+        pData->currentProjectFolder.clear();
+    }
+}
+
 const char* CarlaEngine::getCurrentProjectFolder() const noexcept
 {
     return pData->currentProjectFolder.isNotEmpty() ? pData->currentProjectFolder.buffer()
@@ -2764,11 +2751,11 @@ static water::String findBinaryInCustomPath(const char* const searchPath, const 
 }
 
 bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alwaysLoadConnections,
-                                      const char* const projectFilename)
+                                      const char* const projectFilename, bool* const rackReplaced)
 {
     carla_debug("CarlaEngine::loadProjectInternal(%p, %s) - START", &xmlDoc, bool2str(alwaysLoadConnections));
 
-    ScopedPointer<XmlElement> xmlElement(xmlDoc.getDocumentElement(true));
+    ScopedPointer<XmlElement> xmlElement(xmlDoc.getDocumentElement(rackReplaced == nullptr));
     CARLA_SAFE_ASSERT_RETURN_ERR(xmlElement != nullptr, "Failed to parse project file");
 
     const water::String& xmlType(xmlElement->getTagName());
@@ -2776,7 +2763,8 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
 
     if (! (xmlType.equalsIgnoreCase("carla-project") || isPreset))
     {
-        callback(true, true, ENGINE_CALLBACK_PROJECT_LOAD_FINISHED, 0, 0, 0, 0, 0.0f, nullptr);
+        if (rackReplaced == nullptr)
+            callback(true, true, ENGINE_CALLBACK_PROJECT_LOAD_FINISHED, 0, 0, 0, 0, 0.0f, nullptr);
         setLastError("Not a valid Carla project or preset file");
         return false;
     }
@@ -2799,17 +2787,34 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
     const CarlaScopedValueSetter<bool> csvs(pData->loadingProject, true, false);
 #endif
 
-    // completely load file
-    xmlElement = xmlDoc.getDocumentElement(false);
-    CARLA_SAFE_ASSERT_RETURN_ERR(xmlElement != nullptr, "Failed to completely parse project file");
+    // The replacement path has already parsed the entire file before any rack changes.
+    if (rackReplaced == nullptr)
+    {
+        xmlElement = xmlDoc.getDocumentElement(false);
+        CARLA_SAFE_ASSERT_RETURN_ERR(xmlElement != nullptr, "Failed to completely parse project file");
+    }
 
     if (pData->aboutToClose)
-        return true;
+        return rackReplaced == nullptr;
 
     if (pData->actionCanceled)
     {
         setLastError("Project load canceled");
         return false;
+    }
+
+    if (rackReplaced != nullptr)
+    {
+        if (! removeAllPlugins())
+        {
+            callback(true, true, ENGINE_CALLBACK_CANCELABLE_ACTION, 0, 0, 0, 0, 0.0f, "Loading project");
+            return false;
+        }
+
+#ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
+        setCurrentProjectFilename(projectFilename);
+#endif
+        *rackReplaced = true;
     }
 
     callback(true, false, ENGINE_CALLBACK_IDLE, 0, 0, 0, 0, 0.0f, nullptr);

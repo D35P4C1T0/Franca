@@ -507,6 +507,12 @@ CARLA_API_EXPORT bool carla_load_file(CarlaHostHandle handle, const char* filena
 CARLA_API_EXPORT bool carla_load_project(CarlaHostHandle handle, const char* filename);
 
 /*!
+ * Open a project, replacing the rack once the file has been parsed.
+ * @param rackReplaced  Set when the new project took over, even if some plugins failed to load.
+ */
+CARLA_API_EXPORT bool carla_open_project(CarlaHostHandle handle, const char* filename, bool* rackReplaced);
+
+/*!
  * Save current project to a file.
  */
 CARLA_API_EXPORT bool carla_save_project(CarlaHostHandle handle, const char* filename);
