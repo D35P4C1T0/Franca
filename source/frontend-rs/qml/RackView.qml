@@ -11,10 +11,19 @@ Item {
     property bool splitMode: false
     property var patchbayView: null
     readonly property bool compactMode: width < 520
+    readonly property int meterWidth: compactMode ? Math.min(46, Math.round(width / 8)) : 62
     property var rackItems: []
     property var meterItems: []
     property var categories: []
     property int selectedPluginId: -1
+
+    TextMetrics {
+        id: unavailableLabel
+        text: qsTr("Unavailable")
+        font.family: Kirigami.Theme.smallFont.family
+        font.pointSize: Kirigami.Theme.smallFont.pointSize
+        font.bold: true
+    }
 
     // Drag-to-reorder state
     property int dragSourceIdx: -1
@@ -325,7 +334,7 @@ Item {
                     anchors.fill: parent
                     anchors.leftMargin: root.compactMode ? 8 : 11
                     anchors.rightMargin: root.compactMode ? 6 : 8
-                    spacing: root.compactMode ? 4 : 6
+                    spacing: root.compactMode ? 2 : 6
 
                     // 1. Drag handle (immediate drag on press)
                     Item {
@@ -384,19 +393,21 @@ Item {
                         Controls.ToolTip.text: rowItem.modelData.active ? qsTr("Bypass effect") : qsTr("Enable effect")
                     }
 
-                    // 3. Plugin Name column (fixed 220px in full view, responsive fill in split/compact mode)
+                    // 3. Plugin Name column (shrink before the controls and meters)
                     Controls.Label {
-                        Layout.fillWidth: root.compactMode
-                        Layout.preferredWidth: root.compactMode ? -1 : 220
-                        Layout.minimumWidth: root.compactMode ? 72 : 220
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 220
+                        Layout.minimumWidth: 0
                         Layout.maximumWidth: root.compactMode ? 9999 : 220
                         text: rowItem.modelData.name
                         elide: Text.ElideRight
                         font.bold: rowItem.isSelected
-                        color: rowItem.isActive ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
-                        opacity: rowItem.isActive ? 1.0 : 0.72
+                        color: rowItem.isUnavailable ? Kirigami.Theme.negativeTextColor
+                            : (rowItem.isActive ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor)
+                        opacity: rowItem.isActive || rowItem.isUnavailable ? 1.0 : 0.72
                         Controls.ToolTip.visible: nameHover.containsMouse
                         Controls.ToolTip.text: rowItem.modelData.name + " [" + rowItem.modelData.format + "]"
+                            + (rowItem.isUnavailable ? "\n" + rowItem.modelData.unavailable_error : "")
                         MouseArea {
                             id: nameHover
                             anchors.fill: parent
@@ -442,12 +453,13 @@ Item {
                         Layout.fillWidth: !root.compactMode
                     }
 
-                    // 5. Format / Unavailable label (hidden when compact unless unavailable)
+                    // 5. Format / Unavailable label (shown in the name tooltip when compact)
                     Controls.Label {
-                        visible: !root.compactMode || rowItem.isUnavailable
-                        Layout.preferredWidth: root.compactMode ? 68 : 82
+                        visible: !root.compactMode
+                        Layout.preferredWidth: Math.max(82, Math.ceil(unavailableLabel.advanceWidth))
                         horizontalAlignment: Text.AlignRight
-                        text: rowItem.isUnavailable ? qsTr("Unavailable") : rowItem.modelData.format
+                        elide: Text.ElideRight
+                        text: rowItem.isUnavailable ? unavailableLabel.text : rowItem.modelData.format
                         color: rowItem.isUnavailable ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
                         opacity: (rowItem.isActive || rowItem.isUnavailable) ? 1.0 : 0.55
                         font.bold: rowItem.isUnavailable
@@ -473,7 +485,7 @@ Item {
                         spacing: 3
                         opacity: rowItem.isActive ? 1.0 : 0.35
                         PeakMeter {
-                            Layout.preferredWidth: root.compactMode ? 46 : 62
+                            Layout.preferredWidth: root.meterWidth
                             Layout.preferredHeight: 12
                             channels: rowItem.modelData.in_channels || 0
                             baseColor: "#4ADE80"
@@ -484,7 +496,7 @@ Item {
                             tooltipText: qsTr("Input level")
                         }
                         PeakMeter {
-                            Layout.preferredWidth: root.compactMode ? 46 : 62
+                            Layout.preferredWidth: root.meterWidth
                             Layout.preferredHeight: 12
                             channels: rowItem.modelData.out_channels || 0
                             baseColor: "#38BDF8"
