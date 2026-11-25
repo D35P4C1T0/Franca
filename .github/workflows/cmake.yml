@@ -34,34 +34,6 @@ jobs:
           name: linux-${{ env.PACK_NAME }}
           path: ${{ env.DESTDIR }}
 
-  macos:
-    strategy:
-      matrix:
-        include:
-          - frameworks: ON
-          - frameworks: OFF
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up dependencies
-        run: |
-          brew install cmake fluid-synth liblo libmagic libsndfile pkg-config
-          if [ "${{ matrix.frameworks }}" = "" ]; then
-            echo "PACK_NAME=frameworks" >> "${GITHUB_ENV}"
-          else
-            echo "PACK_NAME=libs" >> "${GITHUB_ENV}"
-          fi
-      - name: configure
-        run: cmake -S cmake -B build -DCARLA_BUILD_FRAMEWORKS=${{ matrix.frameworks }}
-      - name: build
-        run: cmake --build build -j $(sysctl -n hw.logicalcpu)
-      - name: install
-        run: cmake --install build --verbose
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ env.PACK_NAME }}-${{ matrix.frameworks }}
-          path: ${{ env.DESTDIR }}
-
   mingw32-cross:
     strategy:
       matrix:

@@ -5,8 +5,6 @@ on: [push, pull_request]
 env:
   DEBIAN_FRONTEND: noninteractive
   EMSCRIPTEN_VERSION: 3.1.27
-  HOMEBREW_NO_AUTO_UPDATE: 1
-  HOMEBREW_NO_INSTALL_CLEANUP: 1
 
 jobs:
   linux:
@@ -39,25 +37,6 @@ jobs:
         run: make check-franca
       - name: make posix32
         run: make posix32 -j $(nproc)
-
-  macos:
-    strategy:
-      matrix:
-        include:
-          - target: macos-15-intel
-          - target: macos-15
-    runs-on: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Set up dependencies
-        run: |
-          brew install fluid-synth liblo libmagic libsndfile pkg-config pyqt@5 qt@5 sdl2
-      - name: make features
-        run: make features
-      - name: make
-        run: make -j $(sysctl -n hw.logicalcpu)
 
   wasm:
     runs-on: ubuntu-24.04
