@@ -39,7 +39,7 @@ endif
 all: native
 
 ifeq ($(LINUX),true)
-ifneq ($(CROSS_COMPILING),true)
+ifeq (,$(filter true,$(CROSS_COMPILING) $(SKIP_RUST_UI)))
 all: franca-ui
 endif
 endif

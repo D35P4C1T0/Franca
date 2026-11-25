@@ -14,13 +14,20 @@ jobs:
         # TODO: add PawPaw bootstrap type
         # linux-arm64, linux-armhf, linux-i686, linux-riscv64,
     runs-on: ubuntu-22.04
+    container:
+      image: debian:12
     steps:
+      - name: Install checkout dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -yqq ca-certificates git lsb-release
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: distrho/dpf-makefile-action@v1
         with:
           target: ${{ matrix.target }}
+          extraargs: SKIP_RUST_UI=true
           pawpaw: true
           release: false
 

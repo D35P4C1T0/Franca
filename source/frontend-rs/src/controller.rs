@@ -711,7 +711,9 @@ impl FrancaCore {
             }
             ENGINE_CALLBACK_PROJECT_LOAD_FINISHED => {
                 self.is_project_loading = false;
-                self.history.clear();
+                if !self.history.busy {
+                    self.history.clear();
+                }
                 self.history.set_blocked(false);
                 self.history_plugin_count = self.slots.len();
                 self.needs_patchbay_refresh = true;
@@ -1728,9 +1730,7 @@ impl FrancaCore {
         if !self.history.can_undo() {
             return;
         }
-        self.history.busy = true;
         let err = self.apply_history_step(true);
-        self.history.busy = false;
         if let Some(msg) = err {
             self.history.revert_undo_index();
             self.pending.alerts.push(("Undo Failed".into(), msg));
@@ -1743,9 +1743,7 @@ impl FrancaCore {
         if !self.history.can_redo() {
             return;
         }
-        self.history.busy = true;
         let err = self.apply_history_step(false);
-        self.history.busy = false;
         if let Some(msg) = err {
             self.history.revert_redo_index();
             self.pending.alerts.push(("Redo Failed".into(), msg));
@@ -1801,6 +1799,7 @@ impl FrancaCore {
             )
         };
 
+        self.history.busy = true;
         let result: Result<(), String> = match &mut entry_action {
             HistoryAction::MovePlugin { from, to } => {
                 let (src, dst) = if is_undo { (*to, *from) } else { (*from, *to) };
@@ -2053,6 +2052,7 @@ impl FrancaCore {
                 Ok(())
             }
         };
+        self.history.busy = false;
 
         if is_undo {
             if let Some(e) = self.history.take_redo() {
