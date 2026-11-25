@@ -65,10 +65,9 @@ download_tool "https://github.com/AppImage/appimagetool/releases/download/contin
 if [ "$NO_BUILD" -eq 0 ]; then
     echo "==> Building Franca backend, bridges, discovery, and Rust UI"
     make -j"$JOBS"
-    make rust-ui
 fi
 
-[ -x "$REPO_ROOT/bin/franca-ui" ] || { echo "ERROR: bin/franca-ui not found; run 'make rust-ui' first." >&2; exit 1; }
+[ -x "$REPO_ROOT/bin/franca-ui" ] || { echo "ERROR: bin/franca-ui not found. Run 'make' first." >&2; exit 1; }
 
 echo "==> Preparing AppDir at $APPDIR"
 rm -rf "$APPDIR"

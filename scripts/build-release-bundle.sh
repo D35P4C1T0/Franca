@@ -40,7 +40,6 @@ BUNDLE_DIR="$STAGE_ROOT/$BUNDLE_NAME"
 if [ "$NO_BUILD" -eq 0 ]; then
     echo "==> Building Franca backend, bridges, discovery, and Rust UI"
     make -j"$JOBS"
-    make rust-ui
 fi
 
 rm -rf "$BUNDLE_DIR"

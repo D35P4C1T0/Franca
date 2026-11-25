@@ -75,7 +75,6 @@ jobs:
           make features
           make -j"$(nproc)"
           make posix32 -j"$(nproc)"
-          make rust-ui
 
       - name: Run Franca smoke tests, Rust tests, and UI regression suite
         run: |

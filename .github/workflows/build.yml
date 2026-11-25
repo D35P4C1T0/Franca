@@ -34,8 +34,8 @@ jobs:
           ln -s /usr/lib/i386-linux-gnu/libXext.so.6 /usr/lib/i386-linux-gnu/libXext.so
       - name: make features
         run: make features
-      - name: make
-        run: make -j $(nproc)
+      - name: Build engine and legacy frontend
+        run: make -j $(nproc) native
       - name: Franca smoke tests
         run: make check-franca
       - name: make posix32

@@ -1,14 +1,17 @@
 # Build Franca on Arch Linux
 
-Use a C and C++ toolchain, Make, pkg-config, and Python with PyQt6 or PyQt5. The build prefers Qt 6 when both are available. On Plasma, Franca uses the Qt platform theme supplied by Plasma Integration. Run `make features` to check which drivers, plugin formats, and editors will be available. For full Linux hosting support, build with liblo, libmagic, FluidSynth, libsndfile, ALSA, PulseAudio, and the X11 and OpenGL libraries.
+Use a C and C++ toolchain, Make, pkg-config, Rust with Cargo, Qt 6 development tools including Qt Declarative, and KDE Kirigami. Plasma Integration supplies the Qt platform theme on KDE Plasma. Install Python and the PyQt6 or PyQt5 build tools for the fallback UI and Python-based plugin editors included by `make install`.
+
+Run `make features` to check which drivers, plugin formats, and editors will be available. For full Linux hosting support, build with liblo, libmagic, FluidSynth, libsndfile, ALSA, PulseAudio, and the X11 and OpenGL libraries.
+
+From the `main` source directory, build and launch the desktop app.
 
 ```sh
-make -j"$(nproc)"
-make check-franca
-./source/frontend/franca
+make
+./bin/franca-ui
 ```
 
-For an existing PipeWire setup, use the JACK driver and the same engine mode as your Carla setup. Run `pw-jack ./source/frontend/franca project.carxp` when you need to select PipeWire’s JACK implementation explicitly. Open the Patchbay to connect the rack to your existing virtual mic.
+Use `make -j"$(nproc)"` for a parallel build and `make check-franca` for a smoke test. For an existing PipeWire setup, use the JACK driver and the same engine mode as your Carla setup. Run `pw-jack ./bin/franca-ui project.carxp` when you need to select PipeWire’s JACK implementation explicitly. Open the Patchbay to connect the rack to your existing virtual mic.
 
 ## Wine
 
@@ -27,5 +30,7 @@ After building, run `make install` with a writable `PREFIX`, or use the privileg
 
 ```sh
 make install PREFIX="$HOME/.local"
-"$HOME/.local/bin/franca" project.carxp
+"$HOME/.local/bin/franca"
 ```
+
+Set `FRANCA_LEGACY_UI=1` when launching the installed app to use the Python/Qt fallback.

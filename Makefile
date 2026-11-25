@@ -35,7 +35,16 @@ ifneq ($(WASM),true)
 TARGETS += bridges-plugin bridges-ui discovery interposer libjack
 endif
 
-all: $(TARGETS)
+.PHONY: all native
+all: native
+
+ifeq ($(LINUX),true)
+ifneq ($(CROSS_COMPILING),true)
+all: franca-ui
+endif
+endif
+
+native: $(TARGETS)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Binaries (native)
@@ -371,11 +380,11 @@ ifneq ($(STATIC_PLUGIN_TARGET),true)
 	$(MAKE) clean -C source/tests
 	$(MAKE) clean -C source/theme
 endif
-	rm -f *~ source/*~
+	rm -f bin/franca-ui *~ source/*~
 
 distclean: clean
 	rm -f bin/*.exe bin/*.dll bin/*.dylib bin/*.so
-	rm -rf build build-lv2
+	rm -rf build build-lv2 source/frontend-rs/target
 
 cpp:
 	$(MAKE) CPPMODE=true
@@ -389,13 +398,16 @@ doxygen:
 tests:
 	$(MAKE) -C source/tests
 
-.PHONY: check-franca rust-ui check-rust-ui check-ui-contracts check-ui-smoke
+.PHONY: check-franca franca-ui rust-ui check-rust-ui check-ui-contracts check-ui-smoke
 check-franca: backend discovery
 	PYTHONPATH=source/frontend python3 source/tests/franca-smoke.py
 
-rust-ui:
+franca-ui:
 	cargo build --release --manifest-path source/frontend-rs/Cargo.toml
+	install -d bin
 	install -m 755 source/frontend-rs/target/release/franca-ui bin/franca-ui
+
+rust-ui: franca-ui
 
 check-rust-ui: backend discovery
 	cargo test --manifest-path source/frontend-rs/Cargo.toml
@@ -403,7 +415,7 @@ check-rust-ui: backend discovery
 check-ui-contracts:
 	python3 source/tests/test_ui_regression.py
 
-check-ui-smoke: backend discovery rust-ui
+check-ui-smoke: backend discovery franca-ui
 	python3 scripts/ui_smoke.py
 
 stoat:

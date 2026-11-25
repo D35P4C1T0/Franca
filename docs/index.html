@@ -34,7 +34,7 @@
           <ul class="nav-links">
             <li><a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">Documentation</a></li>
             <li><a href="https://github.com/D35P4C1T0/Franca">Source</a></li>
-            <li><a href="#install">Downloads</a></li>
+            <li><a href="#install">Installation</a></li>
           </ul>
         </nav>
 
@@ -311,16 +311,18 @@
         <div class="split-aside">
           <h2 id="install-heading">Installation</h2>
           <p>
-            Built from source on Arch Linux. Requires a C/C++ toolchain, Make, pkg-config, Qt&nbsp;6, KDE
-            Kirigami and Rust/Cargo.
+            On Arch Linux, <code>make</code> builds the engine and desktop app. Check out
+            <a href="https://github.com/D35P4C1T0/Franca/tree/main"><code>main</code></a> or download the
+            <a href="https://github.com/D35P4C1T0/Franca/archive/refs/heads/main.zip">source ZIP</a>.
+            Run these commands from the source directory.
           </p>
         </div>
 
         <div class="split-body">
           <div class="install-step">
             <div class="step-header">
-              <span class="step-label">01 / Build backend &amp; native UI</span>
-              <span class="step-note">Run <code>make features</code> first to inspect detected formats</span>
+              <span class="step-label">01 / Build Franca</span>
+              <span class="step-note">See INSTALL.md for dependencies</span>
             </div>
             <div class="code-wrap">
               <button class="copy-btn" type="button" aria-label="Copy build commands">
@@ -330,10 +332,7 @@
                 </svg>
                 <span>Copy</span>
               </button>
-              <pre><code>git clone https://github.com/D35P4C1T0/Franca.git
-cd Franca
-make -j"$(nproc)"
-make rust-ui</code></pre>
+              <pre><code>make</code></pre>
             </div>
           </div>
 
@@ -350,7 +349,10 @@ make rust-ui</code></pre>
                 </svg>
                 <span>Copy</span>
               </button>
-              <pre><code>make -j"$(nproc)" win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ AR=x86_64-w64-mingw32-ar
+              <pre><code>make -j"$(nproc)" win64 \
+  CC=x86_64-w64-mingw32-gcc \
+  CXX=x86_64-w64-mingw32-g++ \
+  AR=x86_64-w64-mingw32-ar
 make wine64</code></pre>
             </div>
           </div>
@@ -369,19 +371,14 @@ make wine64</code></pre>
                 <span>Copy</span>
               </button>
               <pre><code>make install PREFIX="$HOME/.local"
-pw-jack "$HOME/.local/bin/franca" project.carxp</code></pre>
+"$HOME/.local/bin/franca"</code></pre>
             </div>
           </div>
 
           <div class="install-meta">
             <p>
-              Full dependency list, smoke test (<code>make check-franca</code>) and Wine bridge notes are
-              documented in <a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">INSTALL.md</a>.
-            </p>
-            <p>
-              No prebuilt binary releases yet — clone <code>main</code> or download the
-              <a href="https://github.com/D35P4C1T0/Franca/archive/refs/heads/main.zip">source archive (ZIP)</a>.
-              The fallback Python/Qt UI remains selectable with <code>FRANCA_LEGACY_UI=1</code>.
+              See <a href="https://github.com/D35P4C1T0/Franca/blob/main/INSTALL.md">INSTALL.md</a>
+              for dependencies, smoke tests and Wine bridge setup.
             </p>
           </div>
         </div>
