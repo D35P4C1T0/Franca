@@ -133,12 +133,34 @@ ColumnLayout {
         } catch (e) {}
     }
 
+    function arraysEqual(a, b) {
+        if (!a || !b || a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) return false;
+        }
+        return true;
+    }
+
     function parseMeters() {
+        if (!root.visible || (!root.controller.show_meters && !root.controller.show_keyboard)) {
+            return;
+        }
         try {
             var m = JSON.parse(controller.meters_json);
-            if (m.canvas) canvasMeters = m.canvas;
-            canvasNotes = m.canvas_notes || [];
+            if (root.controller.show_meters && m.canvas) {
+                canvasMeters = m.canvas;
+            }
+            if (root.controller.show_keyboard) {
+                var nextNotes = m.canvas_notes || [];
+                if (!arraysEqual(canvasNotes, nextNotes)) {
+                    canvasNotes = nextNotes;
+                }
+            }
         } catch (e) {}
+    }
+
+    onVisibleChanged: {
+        if (visible) parseMeters();
     }
 
     function screenToScene(sx, sy) {
@@ -296,6 +318,8 @@ ColumnLayout {
         target: root.controller
         function onPatchbay_jsonChanged() { root.parseScene(); }
         function onMeters_jsonChanged() { root.parseMeters(); }
+        function onShow_metersChanged() { if (root.controller.show_meters) root.parseMeters(); }
+        function onShow_keyboardChanged() { if (root.controller.show_keyboard) root.parseMeters(); }
         function onFocus_patchbay_requested() { root.focusSelected(); }
     }
 

@@ -18,11 +18,22 @@ Item {
     property color clipCapColor: "#EF4444"
     property string tooltipText: ""
 
-    onLevelLChanged: canvas.requestPaint()
-    onLevelRChanged: canvas.requestPaint()
-    onClipLChanged: canvas.requestPaint()
-    onClipRChanged: canvas.requestPaint()
-    onChannelsChanged: canvas.requestPaint()
+    readonly property int chCount: Math.max(0, Math.min(2, root.channels))
+    readonly property real innerW: Math.max(1, width - 2)
+    readonly property real innerH: Math.max(1, height - 2)
+    readonly property real hGap: chCount > 1 ? 1 : 0
+    readonly property real vGap: chCount > 1 ? 2 : 0
+    readonly property real chH: chCount > 0 ? (innerH - hGap * (chCount - 1)) / chCount : 0
+    readonly property real chW: chCount > 0 ? (innerW - vGap * (chCount - 1)) / chCount : 0
+
+    readonly property real normL: Math.max(0, Math.min(1, levelL))
+    readonly property real normR: Math.max(0, Math.min(1, levelR))
+    readonly property real barSpanL: clipL
+        ? Math.max(vertical ? 4 : 3, (vertical ? innerH : innerW) * Math.max(normL, 0.95))
+        : (normL > 0.001 ? (vertical ? innerH : innerW) * Math.sqrt(normL) : 0)
+    readonly property real barSpanR: clipR
+        ? Math.max(vertical ? 4 : 3, (vertical ? innerH : innerW) * Math.max(normR, 0.95))
+        : (normR > 0.001 ? (vertical ? innerH : innerW) * Math.sqrt(normR) : 0)
 
     Controls.ToolTip.visible: hoverArea.containsMouse && tooltipText.length > 0
     Controls.ToolTip.text: tooltipText
@@ -34,72 +45,52 @@ Item {
         acceptedButtons: Qt.NoButton
     }
 
-    Canvas {
-        id: canvas
+    // Native GPU-batched meter well & bars (avoids software Canvas rasterization)
+    Rectangle {
         anchors.fill: parent
-        onPaint: {
-            var ctx = getContext("2d");
-            var w = width;
-            var h = height;
-            ctx.clearRect(0, 0, w, h);
+        clip: true
+        color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+        border.width: 1
+        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
 
-            // Background well
-            ctx.fillStyle = Qt.darker(Kirigami.Theme.backgroundColor, 1.35);
-            ctx.fillRect(0, 0, w, h);
-            ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor, 0.2);
-            ctx.lineWidth = 1;
-            ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+        // Channel 0 (Left / Mono)
+        Rectangle {
+            visible: root.chCount >= 1 && root.barSpanL > 0
+            x: 1
+            y: root.vertical ? (1 + root.innerH - root.barSpanL) : 1
+            width: root.vertical ? root.chW : root.barSpanL
+            height: root.vertical ? root.barSpanL : root.chH
+            color: root.clipL
+                ? root.clipColor
+                : (root.normL >= 0.85 ? root.hotColor : root.baseColor)
+        }
+        Rectangle {
+            visible: root.chCount >= 1 && root.clipL
+            x: root.vertical ? 1 : (1 + root.innerW - Math.min(3, root.innerW))
+            y: 1
+            width: root.vertical ? root.chW : Math.min(3, root.innerW)
+            height: root.vertical ? Math.min(3, root.innerH) : root.chH
+            color: root.clipCapColor
+        }
 
-            var chCount = Math.max(0, Math.min(2, root.channels));
-            if (chCount === 0) return;
-
-            var levels = [root.levelL, root.levelR];
-            var clips = [root.clipL, root.clipR];
-
-            if (!root.vertical) {
-                var innerW = Math.max(1, w - 2);
-                var innerH = Math.max(1, h - 2);
-                var gap = chCount > 1 ? 1 : 0;
-                var chH = (innerH - gap * (chCount - 1)) / chCount;
-                for (var i = 0; i < chCount; i++) {
-                    var y0 = 1 + i * (chH + gap);
-                    var lv = Math.max(0, Math.min(1, levels[i]));
-                    if (clips[i]) {
-                        var fw = Math.max(3, innerW * Math.max(lv, 0.95));
-                        ctx.fillStyle = root.clipColor;
-                        ctx.fillRect(1, y0, fw, chH);
-                        var capW = Math.min(3, innerW);
-                        ctx.fillStyle = root.clipCapColor;
-                        ctx.fillRect(1 + innerW - capW, y0, capW, chH);
-                    } else if (lv > 0.001) {
-                        var vis = Math.sqrt(lv);
-                        ctx.fillStyle = lv >= 0.85 ? root.hotColor : root.baseColor;
-                        ctx.fillRect(1, y0, innerW * vis, chH);
-                    }
-                }
-            } else {
-                var iw = Math.max(1, w - 2);
-                var ih = Math.max(1, h - 2);
-                var vgap = chCount > 1 ? 2 : 0;
-                var chW = (iw - vgap * (chCount - 1)) / chCount;
-                for (var j = 0; j < chCount; j++) {
-                    var x0 = 1 + j * (chW + vgap);
-                    var vlv = Math.max(0, Math.min(1, levels[j]));
-                    if (clips[j]) {
-                        var fh = Math.max(4, ih * Math.max(vlv, 0.95));
-                        ctx.fillStyle = root.clipColor;
-                        ctx.fillRect(x0, 1 + ih - fh, chW, fh);
-                        var capH = Math.min(3, ih);
-                        ctx.fillStyle = root.clipCapColor;
-                        ctx.fillRect(x0, 1, chW, capH);
-                    } else if (vlv > 0.001) {
-                        var vvis = Math.sqrt(vlv);
-                        var barH = ih * vvis;
-                        ctx.fillStyle = vlv >= 0.85 ? root.hotColor : root.baseColor;
-                        ctx.fillRect(x0, 1 + ih - barH, chW, barH);
-                    }
-                }
-            }
+        // Channel 1 (Right)
+        Rectangle {
+            visible: root.chCount >= 2 && root.barSpanR > 0
+            x: root.vertical ? (1 + root.chW + root.vGap) : 1
+            y: root.vertical ? (1 + root.innerH - root.barSpanR) : (1 + root.chH + root.hGap)
+            width: root.vertical ? root.chW : root.barSpanR
+            height: root.vertical ? root.barSpanR : root.chH
+            color: root.clipR
+                ? root.clipColor
+                : (root.normR >= 0.85 ? root.hotColor : root.baseColor)
+        }
+        Rectangle {
+            visible: root.chCount >= 2 && root.clipR
+            x: root.vertical ? (1 + root.chW + root.vGap) : (1 + root.innerW - Math.min(3, root.innerW))
+            y: root.vertical ? 1 : (1 + root.chH + root.hGap)
+            width: root.vertical ? root.chW : Math.min(3, root.innerW)
+            height: root.vertical ? Math.min(3, root.innerH) : root.chH
+            color: root.clipCapColor
         }
     }
 }

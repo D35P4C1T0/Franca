@@ -3,6 +3,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use chrono::Local;
@@ -55,6 +56,7 @@ impl RotatingLogger {
 
     pub fn clear_ui_lines(&mut self) {
         self.ui_lines.clear();
+        UI_LINES_REV.fetch_add(1, Ordering::Relaxed);
         self.append_ui("======= Logs cleared ========");
     }
 
@@ -82,6 +84,7 @@ impl RotatingLogger {
                     let drain = self.ui_lines.len() - 4000;
                     self.ui_lines.drain(0..drain);
                 }
+                UI_LINES_REV.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -120,6 +123,11 @@ impl RotatingLogger {
 }
 
 static GLOBAL_LOGGER: OnceLock<Mutex<RotatingLogger>> = OnceLock::new();
+static UI_LINES_REV: AtomicU64 = AtomicU64::new(0);
+
+pub fn ui_lines_revision() -> u64 {
+    UI_LINES_REV.load(Ordering::Relaxed)
+}
 
 pub fn default_log_dir() -> PathBuf {
     if let Ok(env_dir) = std::env::var("FRANCA_LOG_DIR") {

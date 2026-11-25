@@ -659,28 +659,59 @@ impl qobject::FrancaController {
             self.as_mut().set_redo_label(rl);
         }
 
-        // Layout & Settings flags
-        let s = self.rust().core.settings.clone();
-        if *self.show_toolbar() != s.show_toolbar {
-            self.as_mut().set_show_toolbar(s.show_toolbar);
+        // Layout & Settings flags (read scalar Copy fields without cloning Vec/Map settings)
+        let (
+            show_toolbar,
+            show_side_panel,
+            show_meters,
+            show_keyboard,
+            split_view,
+            split_view_ratio,
+            split_minimap_dock,
+            show_logs,
+            confirm_exit,
+            experimental,
+            exp_export_lv2,
+            exp_jack_apps,
+            refresh_interval_ms,
+        ) = {
+            let s = &self.rust().core.settings;
+            (
+                s.show_toolbar,
+                s.show_side_panel,
+                s.show_meters,
+                s.show_keyboard,
+                s.split_view,
+                s.split_view_ratio,
+                s.split_minimap_dock,
+                s.show_logs,
+                s.confirm_exit,
+                s.experimental,
+                s.exp_export_lv2,
+                s.exp_jack_apps,
+                s.refresh_interval_ms,
+            )
+        };
+        if *self.show_toolbar() != show_toolbar {
+            self.as_mut().set_show_toolbar(show_toolbar);
         }
-        if *self.show_side_panel() != s.show_side_panel {
-            self.as_mut().set_show_side_panel(s.show_side_panel);
+        if *self.show_side_panel() != show_side_panel {
+            self.as_mut().set_show_side_panel(show_side_panel);
         }
-        if *self.show_meters() != s.show_meters {
-            self.as_mut().set_show_meters(s.show_meters);
+        if *self.show_meters() != show_meters {
+            self.as_mut().set_show_meters(show_meters);
         }
-        if *self.show_keyboard() != s.show_keyboard {
-            self.as_mut().set_show_keyboard(s.show_keyboard);
+        if *self.show_keyboard() != show_keyboard {
+            self.as_mut().set_show_keyboard(show_keyboard);
         }
-        if *self.split_view() != s.split_view {
-            self.as_mut().set_split_view(s.split_view);
+        if *self.split_view() != split_view {
+            self.as_mut().set_split_view(split_view);
         }
-        let sratio = s.split_view_ratio.clamp(0.25, 0.80);
+        let sratio = split_view_ratio.clamp(0.25, 0.80);
         if (*self.split_view_ratio() - sratio).abs() > 0.005 {
             self.as_mut().set_split_view_ratio(sratio);
         }
-        let mdock = s.split_minimap_dock.clamp(0, 2);
+        let mdock = split_minimap_dock.clamp(0, 2);
         if *self.split_minimap_dock() != mdock {
             self.as_mut().set_split_minimap_dock(mdock);
         }
@@ -688,24 +719,24 @@ impl qobject::FrancaController {
         if *self.hide_unused_ports() != hide_up {
             self.as_mut().set_hide_unused_ports(hide_up);
         }
-        if *self.show_logs() != s.show_logs {
-            self.as_mut().set_show_logs(s.show_logs);
+        if *self.show_logs() != show_logs {
+            self.as_mut().set_show_logs(show_logs);
         }
-        if *self.confirm_exit() != s.confirm_exit {
-            self.as_mut().set_confirm_exit(s.confirm_exit);
+        if *self.confirm_exit() != confirm_exit {
+            self.as_mut().set_confirm_exit(confirm_exit);
         }
-        if *self.experimental_enabled() != s.experimental {
-            self.as_mut().set_experimental_enabled(s.experimental);
+        if *self.experimental_enabled() != experimental {
+            self.as_mut().set_experimental_enabled(experimental);
         }
-        let exp_lv2 = s.experimental && s.exp_export_lv2;
+        let exp_lv2 = experimental && exp_export_lv2;
         if *self.export_lv2_enabled() != exp_lv2 {
             self.as_mut().set_export_lv2_enabled(exp_lv2);
         }
-        let exp_jack = s.experimental && s.exp_jack_apps;
+        let exp_jack = experimental && exp_jack_apps;
         if *self.jack_apps_enabled() != exp_jack {
             self.as_mut().set_jack_apps_enabled(exp_jack);
         }
-        let rint = s.refresh_interval_ms.clamp(10, 100) as i32;
+        let rint = refresh_interval_ms.clamp(10, 100) as i32;
         if *self.refresh_interval_ms() != rint {
             self.as_mut().set_refresh_interval_ms(rint);
         }

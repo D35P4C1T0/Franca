@@ -210,7 +210,7 @@ pub struct FrancaCore {
 
     pub current_dir: PathBuf,
     pub selected_folder_idx: usize,
-    pub last_log_count: usize,
+    pub last_log_rev: u64,
     pub ipc_server: Option<IpcServer>,
     pub pending: PendingUiSignals,
 }
@@ -320,7 +320,7 @@ impl FrancaCore {
             canvas_active_notes: HashSet::new(),
             current_dir: dirs_home(),
             selected_folder_idx: 0,
-            last_log_count: 0,
+            last_log_rev: 0,
             ipc_server,
             pending: PendingUiSignals {
                 rack_dirty: true,
@@ -602,9 +602,9 @@ impl FrancaCore {
             }
         }
 
-        let log_count = logging::ui_lines_snapshot().len();
-        if log_count != self.last_log_count {
-            self.last_log_count = log_count;
+        let log_rev = logging::ui_lines_revision();
+        if log_rev != self.last_log_rev {
+            self.last_log_rev = log_rev;
             self.pending.logs_dirty = true;
         }
     }
@@ -2146,28 +2146,29 @@ impl FrancaCore {
             canvas: MeterItem,
             canvas_notes: Vec<u8>,
         }
+        let q = |v: f32| (v * 200.0).round() * 0.005;
         let slots: Vec<MeterItem> = self
             .slots
             .iter()
             .map(|s| MeterItem {
-                in_l: s.peak_in.smoothed[0],
-                in_r: s.peak_in.smoothed[1],
+                in_l: q(s.peak_in.smoothed[0]),
+                in_r: q(s.peak_in.smoothed[1]),
                 in_clip_l: s.peak_in.is_channel_clipping(0, now),
                 in_clip_r: s.peak_in.is_channel_clipping(1, now),
-                out_l: s.peak_out.smoothed[0],
-                out_r: s.peak_out.smoothed[1],
+                out_l: q(s.peak_out.smoothed[0]),
+                out_r: q(s.peak_out.smoothed[1]),
                 out_clip_l: s.peak_out.is_channel_clipping(0, now),
                 out_clip_r: s.peak_out.is_channel_clipping(1, now),
                 clip_warning: s.clip_warning.is_active(),
             })
             .collect();
         let canvas = MeterItem {
-            in_l: self.canvas_peak_in.smoothed[0],
-            in_r: self.canvas_peak_in.smoothed[1],
+            in_l: q(self.canvas_peak_in.smoothed[0]),
+            in_r: q(self.canvas_peak_in.smoothed[1]),
             in_clip_l: self.canvas_peak_in.is_channel_clipping(0, now),
             in_clip_r: self.canvas_peak_in.is_channel_clipping(1, now),
-            out_l: self.canvas_peak_out.smoothed[0],
-            out_r: self.canvas_peak_out.smoothed[1],
+            out_l: q(self.canvas_peak_out.smoothed[0]),
+            out_r: q(self.canvas_peak_out.smoothed[1]),
             out_clip_l: self.canvas_peak_out.is_channel_clipping(0, now),
             out_clip_r: self.canvas_peak_out.is_channel_clipping(1, now),
             clip_warning: false,

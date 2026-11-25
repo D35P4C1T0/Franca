@@ -86,6 +86,7 @@ Item {
         try { rackItems = JSON.parse(controller.rack_json); } catch (e) { rackItems = []; }
     }
     function parseMeters() {
+        if (!root.visible) return;
         try {
             var m = JSON.parse(controller.meters_json);
             meterItems = m.slots || [];
@@ -93,6 +94,10 @@ Item {
     }
     function parseCategories() {
         try { categories = JSON.parse(controller.categories_json); } catch (e) { categories = []; }
+    }
+
+    onVisibleChanged: {
+        if (visible) parseMeters();
     }
 
     Component.onCompleted: {
