@@ -66,6 +66,30 @@ static int temporaryErrorHandler(Display*, XErrorEvent*)
     return 0;
 }
 
+static int nonFatalX11ErrorHandler(Display* const display, XErrorEvent* const ev)
+{
+    char text[256] = {};
+    if (display != nullptr && ev != nullptr)
+        XGetErrorText(display, ev->error_code, text, sizeof(text));
+    carla_stderr("X11 error ignored (opcode=%u, resource=0x%lx): %s",
+                 ev != nullptr ? static_cast<unsigned>(ev->request_code) : 0u,
+                 ev != nullptr ? static_cast<unsigned long>(ev->resourceid) : 0ul,
+                 text[0] != '\0' ? text : "unknown");
+    return 0;
+}
+
+static void ensureNonFatalX11ErrorHandler() noexcept
+{
+    pthread_mutex_lock(&gErrorMutex);
+    static bool sInstalled = false;
+    if (! sInstalled)
+    {
+        XSetErrorHandler(nonFatalX11ErrorHandler);
+        sInstalled = true;
+    }
+    pthread_mutex_unlock(&gErrorMutex);
+}
+
 class X11PluginUI : public CarlaPluginUI
 {
 public:
@@ -84,6 +108,8 @@ public:
           fMinimumHeight(0),
           fEventProc(nullptr)
      {
+        ensureNonFatalX11ErrorHandler();
+
         fDisplay = XOpenDisplay(nullptr);
         CARLA_SAFE_ASSERT_RETURN(fDisplay != nullptr,);
 
