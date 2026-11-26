@@ -1,6 +1,6 @@
 [package]
 name = "franca-ui"
-version = "2.6.0-alpha1"
+version = "2.6.0-alpha2"
 edition = "2024"
 license = "GPL-2.0-or-later"
 description = "Native Rust + KDE Kirigami/Qt6 desktop GUI for Franca audio plugin host"

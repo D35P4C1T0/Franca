@@ -12,7 +12,7 @@ from sys import platform, maxsize
 # Set Version
 
 CARLA_VERSION_HEX    = 0x020591
-CARLA_VERSION_STRING = "2.6.0-alpha1"
+CARLA_VERSION_STRING = "2.6.0-alpha2"
 CARLA_VERSION_STRMIN = "2.6"
 
 # ---------------------------------------------------------------------------------------------------------------------

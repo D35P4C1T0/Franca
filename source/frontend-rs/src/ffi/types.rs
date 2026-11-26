@@ -4,7 +4,7 @@
 
 use std::ffi::{c_char, c_double, c_float, c_int, c_uchar, c_uint, c_void};
 
-pub const CARLA_VERSION_STRING: &str = "2.6.0-alpha1";
+pub const CARLA_VERSION_STRING: &str = "2.6.0-alpha2";
 
 pub const MAX_DEFAULT_PLUGINS: u32 = 512;
 pub const MAX_RACK_PLUGINS: u32 = 64;

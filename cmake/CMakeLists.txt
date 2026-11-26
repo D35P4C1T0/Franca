@@ -10,7 +10,7 @@ endif()
 
 project(carla)
 
-set(PROJECT_VERSION 2.6.0-alpha1)
+set(PROJECT_VERSION 2.6.0-alpha2)
 set(PROJECT_SHORT_VERSION 2.5.91)
 
 set(CMAKE_POLICY_DEFAULT_CMP0025 NEW)

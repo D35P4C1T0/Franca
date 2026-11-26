@@ -26,7 +26,7 @@ Item {
         try {
             aboutDialog.aboutData = JSON.parse(controller.get_about_json());
         } catch (e) {
-            aboutDialog.aboutData = { version: "2.6.0-alpha1", features: [], license: "" };
+            aboutDialog.aboutData = { version: "2.6.0-alpha2", features: [], license: "" };
         }
         aboutTabs.currentIndex = 0;
         aboutDialog.open();
@@ -145,7 +145,7 @@ Item {
     // 3. About Franca Dialog
     Controls.Dialog {
         id: aboutDialog
-        property var aboutData: ({ version: "2.6.0-alpha1", features: [], license: "" })
+        property var aboutData: ({ version: "2.6.0-alpha2", features: [], license: "" })
         title: qsTr("About Franca")
         modal: true
         anchors.centerIn: Controls.Overlay.overlay

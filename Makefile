@@ -23,7 +23,7 @@ MODULEDIR := $(CURDIR)/build/modules/Release
 endif
 
 # see also cmake/CMakeLists.txt, source/common/__init__.py and source/includes/CarlaDefines.h
-VERSION   := 2.6.0-alpha1
+VERSION   := 2.6.0-alpha2
 
 -include Makefile.user.mk
 

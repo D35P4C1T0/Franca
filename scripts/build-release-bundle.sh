@@ -11,7 +11,7 @@ cd "$REPO_ROOT"
 ARCH="${ARCH:-$(uname -m)}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 VERSION="${VERSION:-$(sed -n 's/^VERSION[[:space:]]*:=[[:space:]]*//p' Makefile | head -n1)}"
-[ -n "$VERSION" ] || VERSION="2.6.0-alpha1"
+[ -n "$VERSION" ] || VERSION="2.6.0-alpha2"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/dist}"
 NO_BUILD=0
 
