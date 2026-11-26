@@ -45,9 +45,11 @@ Item {
         root.dragSourceIdx = -1;
         root.dragTargetIdx = -1;
         root.dragActive = false;
-        if (wasDragging && src >= 0 && dst >= 0 && src !== dst) {
-            root.controller.move_plugin(src, dst);
-            root.selectedPluginId = dst;
+        if (wasDragging && src >= 0 && dst >= 0 && src !== dst && src < root.rackItems.length && dst < root.rackItems.length) {
+            var srcPid = root.rackItems[src].plugin_id;
+            var dstPid = root.rackItems[dst].plugin_id;
+            root.controller.move_plugin(srcPid, dstPid);
+            root.selectedPluginId = dstPid;
         }
     }
 
@@ -284,42 +286,14 @@ Item {
                     y: root.dragTargetIdx > root.dragSourceIdx ? parent.height - 2 : 0
                 }
 
-                // Click, Double-click, Right-click & Row Drag-to-reorder handler
+                // Click, Double-click & Right-click handler (drag-to-reorder is restricted to the grip handle)
                 MouseArea {
                     id: rowMouse
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    preventStealing: true
-                    property real pressY: 0
-                    cursorShape: (root.dragActive && root.dragSourceIdx === rowItem.index) ? Qt.ClosedHandCursor : Qt.ArrowCursor
 
                     onPressed: function(mouse) {
                         root.selectedPluginId = rowItem.pid;
-                        if (mouse.button === Qt.LeftButton && root.rackItems.length > 1) {
-                            pressY = mouse.y;
-                            root.dragSourceIdx = rowItem.index;
-                            root.dragTargetIdx = rowItem.index;
-                            root.dragActive = false;
-                        }
-                    }
-                    onPositionChanged: function(mouse) {
-                        if (!(mouse.buttons & Qt.LeftButton) || root.dragSourceIdx !== rowItem.index) return;
-                        if (!root.dragActive && Math.abs(mouse.y - pressY) >= 6) {
-                            root.dragActive = true;
-                        }
-                        if (root.dragActive) {
-                            root.dragTargetIdx = root.computeDropIndex(rowMouse, mouse.x, mouse.y);
-                        }
-                    }
-                    onReleased: function(mouse) {
-                        if (mouse.button === Qt.LeftButton && root.dragSourceIdx === rowItem.index) {
-                            root.finishDrag();
-                        }
-                    }
-                    onCanceled: {
-                        if (root.dragSourceIdx === rowItem.index) {
-                            root.cancelDrag();
-                        }
                     }
                     onClicked: function(mouse) {
                         root.selectedPluginId = rowItem.pid;
@@ -564,13 +538,13 @@ Item {
             text: qsTr("Move Up")
             icon.name: "go-up"
             enabled: ctxMenu.targetIdx > 0
-            onTriggered: root.controller.move_plugin(ctxMenu.targetSlot.plugin_id, ctxMenu.targetIdx - 1)
+            onTriggered: root.controller.move_plugin(ctxMenu.targetSlot.plugin_id, root.rackItems[ctxMenu.targetIdx - 1].plugin_id)
         }
         Controls.MenuItem {
             text: qsTr("Move Down")
             icon.name: "go-down"
             enabled: ctxMenu.targetIdx >= 0 && ctxMenu.targetIdx + 1 < root.rackItems.length
-            onTriggered: root.controller.move_plugin(ctxMenu.targetSlot.plugin_id, ctxMenu.targetIdx + 1)
+            onTriggered: root.controller.move_plugin(ctxMenu.targetSlot.plugin_id, root.rackItems[ctxMenu.targetIdx + 1].plugin_id)
         }
         Controls.MenuSeparator {}
 

@@ -72,6 +72,10 @@ pub struct RackSlot {
 }
 
 impl RackSlot {
+    pub fn is_standalone_node(&self) -> bool {
+        (self.info.options_enabled & PLUGIN_OPTION_STANDALONE_NODE) != 0
+    }
+
     pub fn from_host(host: &CarlaHost, plugin_id: u32) -> Self {
         let info = host.get_plugin_info(plugin_id);
         let active = host.get_internal_parameter_value(plugin_id, PARAMETER_ACTIVE) >= 0.5;
@@ -165,6 +169,15 @@ pub struct PendingUiSignals {
     pub discovery_dirty: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct PendingPatchbayPlacement {
+    pub expected_pid: u32,
+    pub fallback_name: String,
+    pub x: f32,
+    pub y: f32,
+    pub created_at: Instant,
+}
+
 pub struct FrancaCore {
     pub host: Option<CarlaHost>,
     pub utils: Option<CarlaUtils>,
@@ -203,6 +216,7 @@ pub struct FrancaCore {
     pub history: EditHistory,
     pub history_plugin_count: usize,
     pub patchbay: PatchbayState,
+    pub pending_patchbay_placement: Option<PendingPatchbayPlacement>,
     pub selected_patchbay_plugins: Vec<u32>,
     pub canvas_peak_in: PeakMeterState,
     pub canvas_peak_out: PeakMeterState,
@@ -314,6 +328,7 @@ impl FrancaCore {
             history: EditHistory::new(),
             history_plugin_count: 0,
             patchbay,
+            pending_patchbay_placement: None,
             selected_patchbay_plugins: Vec::new(),
             canvas_peak_in: PeakMeterState::new(2),
             canvas_peak_out: PeakMeterState::new(2),
@@ -733,6 +748,14 @@ impl FrancaCore {
                         self.slots.push(slot);
                     }
                     self.history_plugin_count = self.slots.len();
+                    if let Some(ref mut pending) = self.pending_patchbay_placement {
+                        if pending.created_at.elapsed() <= Duration::from_secs(5) {
+                            pending.expected_pid = pid;
+                            pending.fallback_name = pname.clone();
+                        } else {
+                            self.pending_patchbay_placement = None;
+                        }
+                    }
                     logging::log_ui(&format!("Plugin added: {pname} (id={pid})"));
                     if !self.history.busy && !self.history.blocked && !self.is_project_loading {
                         self.mark_dirty();
@@ -861,8 +884,12 @@ impl FrancaCore {
                 }
             }
             ENGINE_CALLBACK_PATCHBAY_CLIENT_ADDED => {
+                let group_id = ev.plugin_id;
+                let plugin_id = ev.value2;
+                let name = ev.value_str;
                 self.patchbay
-                    .add_group(ev.plugin_id, ev.value2, ev.value1, ev.value_str);
+                    .add_group(group_id, plugin_id, ev.value1, name.clone());
+                self.try_apply_pending_spawn_pos(group_id, plugin_id, &name);
                 self.pending.patchbay_dirty = true;
             }
             ENGINE_CALLBACK_PATCHBAY_CLIENT_REMOVED => {
@@ -874,8 +901,17 @@ impl FrancaCore {
                 self.pending.patchbay_dirty = true;
             }
             ENGINE_CALLBACK_PATCHBAY_CLIENT_DATA_CHANGED => {
+                let group_id = ev.plugin_id;
+                let plugin_id = ev.value2;
                 self.patchbay
-                    .set_group_data(ev.plugin_id, ev.value2, ev.value1);
+                    .set_group_data(group_id, plugin_id, ev.value1);
+                let gname = self
+                    .patchbay
+                    .groups
+                    .get(&group_id)
+                    .map(|g| g.name.clone())
+                    .unwrap_or_default();
+                self.try_apply_pending_spawn_pos(group_id, plugin_id, &gname);
                 self.pending.patchbay_dirty = true;
             }
             ENGINE_CALLBACK_PATCHBAY_CLIENT_POSITION_CHANGED => {
@@ -1425,6 +1461,16 @@ impl FrancaCore {
         replace_id: Option<u32>,
         bridge_mode: i32,
     ) {
+        self.add_discovered_plugin_at(p, replace_id, bridge_mode, None);
+    }
+
+    pub fn add_discovered_plugin_at(
+        &mut self,
+        p: &DiscoveredPlugin,
+        replace_id: Option<u32>,
+        bridge_mode: i32,
+        spawn_pos: Option<(f32, f32)>,
+    ) {
         if !self.engine_running {
             self.pending.alerts.push((
                 "Engine Stopped".into(),
@@ -1460,10 +1506,37 @@ impl FrancaCore {
                 None
             };
 
-        let options = match bridge_mode {
+        let is_standalone = if let Some(rid) = replace_id {
+            self.slots
+                .get(rid as usize)
+                .is_some_and(|s| s.is_standalone_node())
+        } else {
+            spawn_pos.is_some() && self.external_patchbay && self.running_driver_name == "JACK"
+        };
+
+        let mut options = match bridge_mode {
             1 => PLUGIN_OPTION_USE_BRIDGE,
             2 => PLUGIN_OPTION_AVOID_BRIDGE,
             _ => PLUGIN_OPTIONS_NULL,
+        };
+        if is_standalone {
+            if options == PLUGIN_OPTIONS_NULL {
+                options = PLUGIN_OPTION_STANDALONE_NODE;
+            } else {
+                options |= PLUGIN_OPTION_STANDALONE_NODE;
+            }
+        }
+
+        self.pending_patchbay_placement = if replace_id.is_none() {
+            spawn_pos.map(|(x, y)| PendingPatchbayPlacement {
+                expected_pid: self.slots.len() as u32,
+                fallback_name: p.name.clone(),
+                x,
+                y,
+                created_at: Instant::now(),
+            })
+        } else {
+            None
         };
 
         let mut loaded_ok = false;
@@ -1509,6 +1582,36 @@ impl FrancaCore {
             if let (Some(rid), Some((old_name, capture_ext, wiring))) = (replace_id, captured_wiring)
             {
                 self.rewire_replaced_plugin(rid, &old_name, &p.name, capture_ext, &wiring);
+            } else if let Some(pending) = self.pending_patchbay_placement.clone() {
+                if let Some(gid) = self
+                    .patchbay
+                    .find_group_for_plugin(pending.expected_pid, &pending.fallback_name)
+                {
+                    self.pending_patchbay_placement = None;
+                    self.patchbay.move_box(gid, 0, pending.x, pending.y);
+                    self.commit_group_position(gid);
+                    self.pending.patchbay_dirty = true;
+                }
+            }
+        } else {
+            self.pending_patchbay_placement = None;
+        }
+    }
+
+    fn try_apply_pending_spawn_pos(&mut self, group_id: u32, plugin_id: i32, name: &str) {
+        let Some(ref pending) = self.pending_patchbay_placement else {
+            return;
+        };
+        if pending.created_at.elapsed() > Duration::from_secs(5) {
+            self.pending_patchbay_placement = None;
+            return;
+        }
+        let matches = (plugin_id >= 0 && plugin_id as u32 == pending.expected_pid)
+            || (!pending.fallback_name.is_empty() && name == pending.fallback_name);
+        if matches {
+            if let Some(placed) = self.pending_patchbay_placement.take() {
+                self.patchbay.move_box(group_id, 0, placed.x, placed.y);
+                self.commit_group_position(group_id);
             }
         }
     }
@@ -2088,6 +2191,7 @@ impl FrancaCore {
         let items: Vec<SlotDto<'_>> = self
             .slots
             .iter()
+            .filter(|s| !s.is_standalone_node())
             .map(|s| SlotDto {
                 plugin_id: s.plugin_id,
                 name: &s.info.name,
@@ -2150,6 +2254,7 @@ impl FrancaCore {
         let slots: Vec<MeterItem> = self
             .slots
             .iter()
+            .filter(|s| !s.is_standalone_node())
             .map(|s| MeterItem {
                 in_l: q(s.peak_in.smoothed[0]),
                 in_r: q(s.peak_in.smoothed[1]),

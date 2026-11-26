@@ -85,6 +85,8 @@ Item {
 
         MouseArea {
             anchors.fill: parent
+            preventStealing: true
+            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             function moveTo(mx, my) {
                 var data = root.sceneData;
                 var cw = (data && data.canvas_width) ? data.canvas_width : 3100;

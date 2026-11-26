@@ -130,6 +130,8 @@ pub mod qobject {
 
         // Rack Plugins
         #[qinvokable]
+        fn is_plugin_active(self: &FrancaController, plugin_id: i32) -> bool;
+        #[qinvokable]
         fn set_plugin_active(self: Pin<&mut FrancaController>, plugin_id: i32, active: bool);
         #[qinvokable]
         fn toggle_custom_ui(self: Pin<&mut FrancaController>, plugin_id: i32);
@@ -226,6 +228,16 @@ pub mod qobject {
             key: QString,
             replace_id: i32,
             bridge_mode: i32,
+        );
+        #[qinvokable]
+        fn add_plugin_by_key_at(
+            self: Pin<&mut FrancaController>,
+            key: QString,
+            replace_id: i32,
+            bridge_mode: i32,
+            has_pos: bool,
+            scene_x: f64,
+            scene_y: f64,
         );
         #[qinvokable]
         fn toggle_favorite(self: Pin<&mut FrancaController>, key: QString);
@@ -1012,6 +1024,17 @@ impl qobject::FrancaController {
         self.sync_properties();
     }
 
+    pub fn is_plugin_active(&self, plugin_id: i32) -> bool {
+        if plugin_id < 0 {
+            return false;
+        }
+        self.rust()
+            .core
+            .slots
+            .get(plugin_id as usize)
+            .is_some_and(|s| s.active)
+    }
+
     pub fn set_plugin_active(mut self: Pin<&mut Self>, plugin_id: i32, active: bool) {
         if plugin_id >= 0 {
             self.as_mut()
@@ -1533,10 +1556,22 @@ impl qobject::FrancaController {
     }
 
     pub fn add_plugin_by_key_with_bridge(
+        self: Pin<&mut Self>,
+        key: QString,
+        replace_id: i32,
+        bridge_mode: i32,
+    ) {
+        self.add_plugin_by_key_at(key, replace_id, bridge_mode, false, 0.0, 0.0);
+    }
+
+    pub fn add_plugin_by_key_at(
         mut self: Pin<&mut Self>,
         key: QString,
         replace_id: i32,
         bridge_mode: i32,
+        has_pos: bool,
+        scene_x: f64,
+        scene_y: f64,
     ) {
         let k = key.to_string();
         let found = self
@@ -1553,10 +1588,15 @@ impl qobject::FrancaController {
             } else {
                 None
             };
+            let spawn_pos = if has_pos && rid.is_none() {
+                Some((scene_x as f32, scene_y as f32))
+            } else {
+                None
+            };
             self.as_mut()
                 .rust_mut()
                 .core
-                .add_discovered_plugin(&p, rid, bridge_mode);
+                .add_discovered_plugin_at(&p, rid, bridge_mode, spawn_pos);
         }
         self.sync_properties();
     }

@@ -1380,9 +1380,11 @@ void CarlaPlugin::setOption(const uint option, const bool yesNo, const bool send
 
 void CarlaPlugin::setBridgeOptions(const uint options) noexcept
 {
-    const uint bridgeOptions(options & (PLUGIN_OPTION_USE_BRIDGE | PLUGIN_OPTION_AVOID_BRIDGE));
+    static constexpr const uint kHostOptions =
+        PLUGIN_OPTION_USE_BRIDGE | PLUGIN_OPTION_AVOID_BRIDGE | PLUGIN_OPTION_STANDALONE_NODE;
+    const uint bridgeOptions(options & kHostOptions);
 
-    pData->options &= ~(PLUGIN_OPTION_USE_BRIDGE | PLUGIN_OPTION_AVOID_BRIDGE);
+    pData->options &= ~kHostOptions;
     pData->options |= bridgeOptions;
 }
 

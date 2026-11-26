@@ -428,6 +428,7 @@ Controls.ApplicationWindow {
                             Controls.SplitView.minimumWidth: 320
                             Controls.SplitView.fillWidth: !ctrl.split_view
                             controller: ctrl
+                            onOpenAddPluginAt: function(sx, sy) { addPluginDlg.openForAddAt(sx, sy); }
                             onOpenPluginEdit: function(pid) { pluginEditWin.openForPlugin(pid); }
                             onOpenRenamePlugin: function(pid, name) { dialogs.openRename(pid, name); }
                             onOpenReplacePlugin: function(pid) { addPluginDlg.openForReplace(pid); }

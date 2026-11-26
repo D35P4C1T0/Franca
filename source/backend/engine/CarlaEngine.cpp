@@ -526,6 +526,15 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
        #endif
     }
 
+    static constexpr const uint kHostOnlyPluginOptions =
+        PLUGIN_OPTION_USE_BRIDGE | PLUGIN_OPTION_AVOID_BRIDGE | PLUGIN_OPTION_STANDALONE_NODE;
+    const bool isStandaloneNode = options != PLUGIN_OPTIONS_NULL && (options & PLUGIN_OPTION_STANDALONE_NODE) != 0;
+    const uint initOptions = (options == PLUGIN_OPTIONS_NULL
+                              || (options & PLUGIN_OPTIONS_NULL) != 0
+                              || (options != 0 && (options & ~kHostOnlyPluginOptions) == 0))
+                           ? PLUGIN_OPTIONS_NULL
+                           : (options & ~kHostOnlyPluginOptions);
+
     CarlaPlugin::Initializer initializer = {
         this,
         id,
@@ -533,8 +542,15 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
         name,
         label,
         uniqueId,
-        options
+        initOptions
     };
+
+    struct ScopedStandaloneFlag {
+        bool& flag;
+        explicit ScopedStandaloneFlag(bool& f, const bool v) noexcept : flag(f) { flag = v; }
+        ~ScopedStandaloneFlag() noexcept { flag = false; }
+    };
+    const ScopedStandaloneFlag standaloneFlag(pData->addingStandaloneNode, isStandaloneNode);
 
     CarlaPluginPtr plugin;
     String bridgeBinary;
@@ -811,7 +827,7 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
                     "",
                     "http://sfztools.github.io/sfizz",
                     0,
-                    options
+                    initOptions
                 };
 
                 plugin = CarlaPlugin::newLV2(sfizzInitializer);
@@ -868,7 +884,7 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
 
     bool canRun = true;
 
-    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY && ! isStandaloneNode)
     {
         /**/ if (plugin->getMidiInCount() > 1 || plugin->getMidiOutCount() > 1)
         {
@@ -894,7 +910,15 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
         const ScopedRunnerStopper srs(this);
 
         if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
-            pData->graph.replacePlugin(oldPlugin, plugin);
+        {
+            const bool oldWasStandalone = (oldPlugin->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) != 0;
+            if (! oldWasStandalone && ! isStandaloneNode)
+                pData->graph.replacePlugin(oldPlugin, plugin);
+            else if (! oldWasStandalone && isStandaloneNode)
+                pData->graph.removePlugin(oldPlugin);
+            else if (oldWasStandalone && ! isStandaloneNode)
+                pData->graph.addPlugin(plugin);
+        }
 
         const bool  wasActive = oldPlugin->getInternalParameterValue(PARAMETER_ACTIVE) >= 0.5f;
         const float oldDryWet = oldPlugin->getInternalParameterValue(PARAMETER_DRYWET);
@@ -929,7 +953,7 @@ bool CarlaEngine::addPlugin(const BinaryType btype,
             plugin->setActive(true, true, true);
 
        #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
-        if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+        if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY && ! isStandaloneNode)
             pData->graph.addPlugin(plugin);
        #endif
     }
@@ -973,7 +997,8 @@ bool CarlaEngine::removePlugin(const uint id)
     const ScopedRunnerStopper srs(this);
 
 #ifndef BUILD_BRIDGE_ALTERNATIVE_ARCH
-    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY &&
+        (plugin->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) == 0)
         pData->graph.removePlugin(plugin);
 
     const ScopedActionLock sal(this, kEnginePostActionRemovePlugin, id, 0);
@@ -1069,7 +1094,8 @@ bool CarlaEngine::renamePlugin(const uint id, const char* const newName)
 
     plugin->setName(uniqueName);
 
-    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY &&
+        (plugin->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) == 0)
         pData->graph.renamePlugin(plugin, uniqueName);
 
     callback(true, true, ENGINE_CALLBACK_PLUGIN_RENAMED, id, 0, 0, 0, 0.0f, uniqueName);
@@ -1165,7 +1191,9 @@ bool CarlaEngine::switchPlugins(const uint idA, const uint idB) noexcept
 
     const ScopedRunnerStopper srs(this);
 
-    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY &&
+        (pluginA->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) == 0 &&
+        (pluginB->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) == 0)
         pData->graph.switchPlugins(pluginA, pluginB);
 
     const ScopedActionLock sal(this, kEnginePostActionSwitchPlugins, idA, idB);
@@ -3500,12 +3528,19 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
 
                 BridgePollContext pollCtx = { &pendingPlugins, idx + 1, prelaunchCursor };
 
-                if (prelaunched->finishBridgeInit(prelaunched, finishInit, pollOtherBridges, &pollCtx))
+                const bool prelaunchedStandalone = (stateSave.options & PLUGIN_OPTION_STANDALONE_NODE) != 0;
+                pData->addingStandaloneNode = prelaunchedStandalone;
+                const bool finished = prelaunched->finishBridgeInit(prelaunched, finishInit, pollOtherBridges, &pollCtx);
+                pData->addingStandaloneNode = false;
+
+                if (finished)
                 {
+                    if (stateSave.options != PLUGIN_OPTIONS_NULL)
+                        prelaunched->setBridgeOptions(stateSave.options);
                     prelaunched->reload();
 
                     bool canRun = true;
-                    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
+                    if (pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY && ! prelaunchedStandalone)
                     {
                         if (prelaunched->getMidiInCount() > 1 || prelaunched->getMidiOutCount() > 1)
                         {
@@ -3566,7 +3601,7 @@ bool CarlaEngine::loadProjectInternal(water::XmlDocument& xmlDoc, const bool alw
                          0, 0, 0.0f,
                          plugin->getName());
 
-                if (isPatchbay)
+                if (isPatchbay && (plugin->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) == 0)
                     pData->graph.addPlugin(plugin);
             }
             else

@@ -994,6 +994,9 @@ void RackGraph::process(CarlaEngine::ProtectedData* const data, const float* inB
         if (plugin.get() == nullptr || ! plugin->isEnabled())
             continue;
 
+        if ((plugin->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) != 0)
+            continue;
+
         if (! plugin->isActive())
         {
             EnginePluginData& pluginData(data->plugins[i]);

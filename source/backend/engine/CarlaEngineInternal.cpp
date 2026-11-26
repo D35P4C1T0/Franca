@@ -388,6 +388,7 @@ CarlaEngine::ProtectedData::ProtectedData(CarlaEngine* const engine)
       bufferSize(0),
       sampleRate(0.0),
       aboutToClose(false),
+      addingStandaloneNode(false),
       isIdling(0),
       curPluginCount(0),
       maxPluginNumber(0),

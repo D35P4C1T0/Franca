@@ -148,22 +148,16 @@ public:
     {
         carla_debug("CarlaEngineJackAudioPort::CarlaEngineJackAudioPort(%s, %p, %p)", bool2str(isInputPort), jackClient, jackPort);
 
-        switch (kClient.getEngine().getProccessMode())
+        if (jackClient != nullptr && jackPort != nullptr)
         {
-        case ENGINE_PROCESS_MODE_SINGLE_CLIENT:
-        case ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS:
-            CARLA_SAFE_ASSERT_RETURN(jackClient != nullptr && jackPort != nullptr,);
-            {
-                const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
+            const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
 
-                if (const jack_uuid_t uuid = jackbridge_port_uuid(jackPort))
-                    jackbridge_set_property(jackClient, uuid, JACKEY_SIGNAL_TYPE, "AUDIO", URI_TYPE_STRING);
-            }
-            break;
-
-        default:
+            if (const jack_uuid_t uuid = jackbridge_port_uuid(jackPort))
+                jackbridge_set_property(jackClient, uuid, JACKEY_SIGNAL_TYPE, "AUDIO", URI_TYPE_STRING);
+        }
+        else
+        {
             CARLA_SAFE_ASSERT(jackClient == nullptr && jackPort == nullptr);
-            break;
         }
     }
 
@@ -256,22 +250,16 @@ public:
     {
         carla_debug("CarlaEngineJackCVPort::CarlaEngineJackCVPort(%s, %p, %p)", bool2str(isInputPort), jackClient, jackPort);
 
-        switch (kClient.getEngine().getProccessMode())
+        if (jackClient != nullptr && jackPort != nullptr)
         {
-        case ENGINE_PROCESS_MODE_SINGLE_CLIENT:
-        case ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS:
-            CARLA_SAFE_ASSERT_RETURN(jackClient != nullptr && jackPort != nullptr,);
-            {
-                const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
+            const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
 
-                if (const jack_uuid_t uuid = jackbridge_port_uuid(jackPort))
-                    jackbridge_set_property(jackClient, uuid, JACKEY_SIGNAL_TYPE, "CV", URI_TYPE_STRING);
-            }
-            break;
-
-        default:
+            if (const jack_uuid_t uuid = jackbridge_port_uuid(jackPort))
+                jackbridge_set_property(jackClient, uuid, JACKEY_SIGNAL_TYPE, "CV", URI_TYPE_STRING);
+        }
+        else
+        {
             CARLA_SAFE_ASSERT(jackClient == nullptr && jackPort == nullptr);
-            break;
         }
     }
 
@@ -370,15 +358,9 @@ public:
     {
         carla_debug("CarlaEngineJackEventPort::CarlaEngineJackEventPort(%s, %p, %p)", bool2str(isInputPort), jackClient, jackPort);
 
-        switch (kClient.getEngine().getProccessMode())
+        if (jackClient != nullptr || jackPort != nullptr)
         {
-        case ENGINE_PROCESS_MODE_SINGLE_CLIENT:
-        case ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS:
             CARLA_SAFE_ASSERT_RETURN(jackClient != nullptr && jackPort != nullptr,);
-            break;
-        default:
-            CARLA_SAFE_ASSERT(jackClient == nullptr && jackPort == nullptr);
-            break;
         }
     }
 
@@ -781,8 +763,8 @@ public:
         : CarlaEngineClientForSubclassing(engine),
 #endif
           fJackClient(jackClient),
-          fUseClient(engine.getProccessMode() == ENGINE_PROCESS_MODE_SINGLE_CLIENT ||
-                     engine.getProccessMode() == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS),
+          fUseClient(jackClient != nullptr),
+          fOwnsClient(jackClient != nullptr && engine.getProccessMode() != ENGINE_PROCESS_MODE_SINGLE_CLIENT),
 #ifndef BUILD_BRIDGE
           fCallbackLock(),
           fActivating(false),
@@ -817,7 +799,7 @@ public:
     {
         carla_debug("CarlaEngineJackClient::~CarlaEngineJackClient()");
 
-        if (getProcessMode() == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS && fJackClient != nullptr) // FIXME
+        if (fOwnsClient && fJackClient != nullptr)
             jackbridge_client_close(fJackClient);
 
         // ports must have been deleted by now!
@@ -838,7 +820,7 @@ public:
     {
         carla_debug("CarlaEngineJackClient::activate()");
 
-        if (getProcessMode() == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+        if (fOwnsClient)
         {
             CARLA_SAFE_ASSERT_RETURN(fJackClient != nullptr && ! isActive(),);
 
@@ -938,7 +920,7 @@ public:
     {
         carla_debug("CarlaEngineJackClient::deactivate(%s)", bool2str(willClose));
 
-        if (getProcessMode() == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+        if (fOwnsClient)
         {
             if (fJackClient != nullptr && isActive())
             {
@@ -1230,9 +1212,15 @@ public:
     }
 #endif
 
+    bool ownsJackClient() const noexcept
+    {
+        return fOwnsClient;
+    }
+
 private:
     jack_client_t* fJackClient;
     const bool     fUseClient;
+    const bool     fOwnsClient;
 
 #ifndef BUILD_BRIDGE
     CarlaMutex     fCallbackLock;
@@ -1996,7 +1984,7 @@ public:
         {
             client = fClient;
         }
-        else if (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+        else if (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS || pData->addingStandaloneNode)
 #endif
         {
 #ifndef BUILD_BRIDGE
@@ -2094,9 +2082,6 @@ public:
         if (! CarlaEngine::removePlugin(id))
             return false;
 
-        if (pData->options.processMode != ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
-            return true;
-
         const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
 
         for (uint i=id; i < pData->curPluginCount; ++i)
@@ -2107,7 +2092,8 @@ public:
             CarlaEngineJackClient* const client = dynamic_cast<CarlaEngineJackClient*>(plugin->getEngineClient());
             CARLA_SAFE_ASSERT_BREAK(client != nullptr);
 
-            client->setNewPluginId(i);
+            if (client->ownsJackClient())
+                client->setNewPluginId(i);
         }
 
         return true;
@@ -2117,9 +2103,6 @@ public:
     {
         if (! CarlaEngine::switchPlugins(idA, idB))
             return false;
-
-        if (pData->options.processMode != ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
-            return true;
 
         CarlaPluginPtr newPluginA = pData->plugins[idA].plugin;
         CARLA_SAFE_ASSERT_RETURN(newPluginA.get() != nullptr, true);
@@ -2133,10 +2116,13 @@ public:
         CarlaEngineJackClient* const clientB = dynamic_cast<CarlaEngineJackClient*>(newPluginB->getEngineClient());
         CARLA_SAFE_ASSERT_RETURN(clientB != nullptr, true);
 
+        if (clientA->ownsJackClient() || clientB->ownsJackClient())
         {
             const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
-            clientA->setNewPluginId(idA);
-            clientB->setNewPluginId(idB);
+            if (clientA->ownsJackClient())
+                clientA->setNewPluginId(idA);
+            if (clientB->ownsJackClient())
+                clientB->setNewPluginId(idB);
         }
 
         return true;
@@ -2144,12 +2130,6 @@ public:
 
     bool renamePlugin(const uint id, const char* const newName) override
     {
-        if (pData->options.processMode == ENGINE_PROCESS_MODE_CONTINUOUS_RACK ||
-            pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY)
-        {
-            return CarlaEngine::renamePlugin(id, newName);
-        }
-
         CARLA_SAFE_ASSERT_RETURN(pData->plugins != nullptr, false);
         CARLA_SAFE_ASSERT_RETURN(pData->curPluginCount != 0, false);
         CARLA_SAFE_ASSERT_RETURN(id < pData->curPluginCount, false);
@@ -2159,8 +2139,18 @@ public:
         CARLA_SAFE_ASSERT_RETURN_ERR(plugin.get() != nullptr, "Could not find plugin to rename");
         CARLA_SAFE_ASSERT_RETURN_ERR(plugin->getId() == id, "Invalid engine internal data");
 
+        CarlaEngineJackClient* const jackEngClient = dynamic_cast<CarlaEngineJackClient*>(plugin->getEngineClient());
+        const bool ownsClient = jackEngClient != nullptr && jackEngClient->ownsJackClient();
+
+        if (! ownsClient &&
+            (pData->options.processMode == ENGINE_PROCESS_MODE_CONTINUOUS_RACK ||
+             pData->options.processMode == ENGINE_PROCESS_MODE_PATCHBAY))
+        {
+            return CarlaEngine::renamePlugin(id, newName);
+        }
+
         // before we stop the engine thread we might need to get the plugin data
-        const bool needsReinit = (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS);
+        const bool needsReinit = ownsClient;
         const CarlaStateSave* saveStatePtr = nullptr;
 
         if (needsReinit)
@@ -2185,7 +2175,7 @@ public:
 
         const ScopedRunnerStopper srs(this);
 
-        // rename on client client mode, just rename the ports
+        // rename on single client mode, just rename the ports
         if (pData->options.processMode == ENGINE_PROCESS_MODE_SINGLE_CLIENT)
         {
             CarlaEngineJackClient* const client((CarlaEngineJackClient*)plugin->getEngineClient());
@@ -2196,8 +2186,8 @@ public:
                 return false;
             }
         }
-        // rename in multiple client mode
-        else if (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+        // rename in multiple client mode or standalone patchbay node
+        else if (ownsClient)
         {
             CarlaEngineJackClient* const client((CarlaEngineJackClient*)plugin->getEngineClient());
 
@@ -2205,16 +2195,16 @@ public:
             if (jack_client_t* const jackClient = jackbridge_client_open(fClientNamePrefix + uniqueName,
                                                                          JackNoStartServer, nullptr))
             {
-                // get new client name
-                fClientName = jackbridge_get_client_name(jackClient);
+                // get new client name (keep main engine fClientName intact!)
+                const String newClientName(jackbridge_get_client_name(jackClient));
 
                 if (fClientNamePrefix.isNotEmpty())
-                    uniqueName = fClientName.buffer() + fClientNamePrefix.length();
+                    uniqueName = newClientName.buffer() + fClientNamePrefix.length();
                 else
-                    uniqueName = fClientName;
+                    uniqueName = newClientName;
 
                 // close client
-                client->closeForRename(jackClient, fClientName);
+                client->closeForRename(jackClient, newClientName);
 
                 // disable plugin
                 plugin->setEnabled(false);
@@ -2760,6 +2750,13 @@ public:
         /* NOTE: When loading a project, it might take a bit to receive plugins' jack client registration callbacks.
          *       We try to wait a little for it, but not too much.
          */
+        bool isPerPluginClient = (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS);
+        if (! isPerPluginClient && ppos.pluginId >= 0 && static_cast<uint>(ppos.pluginId) < pData->curPluginCount)
+        {
+            if (const CarlaPluginPtr p = pData->plugins[ppos.pluginId].plugin)
+                isPerPluginClient = (p->getOptionsEnabled() & PLUGIN_OPTION_STANDALONE_NODE) != 0;
+        }
+
         if (ppos.pluginId >= 0)
         {
             // strip client name prefix if already in place
@@ -2767,7 +2764,7 @@ public:
                 if (const char* const rname3 = std::strstr(rname2 + 1, "/"))
                     ppos.name = rname3 + 1;
 
-            if (pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+            if (isPerPluginClient)
             {
                 if (fClientNamePrefix.isNotEmpty())
                 {
@@ -2808,7 +2805,7 @@ public:
 
         if (groupId == 0)
         {
-            if (ppos.pluginId < 0 || pData->options.processMode == ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+            if (ppos.pluginId < 0 || isPerPluginClient)
                 carla_stdout("Previously saved client '%s' not found", ppos.name);
         }
         else
@@ -3663,8 +3660,7 @@ private:
     {
         carla_debug("CarlaEngineJack::findPluginIdAndIcon(\"%s\", ...)", clientName);
 
-        // TODO - this currently only works in multi-client mode
-        if (pData->options.processMode != ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS)
+        if (fClient == nullptr)
             return;
 
         const CarlaRecursiveMutexLocker crml(fThreadSafeMetadataMutex);
@@ -4460,7 +4456,8 @@ private:
         CARLA_SAFE_ASSERT_RETURN(pluginPtr != nullptr, 0);
 
         CarlaPluginPtr plugin = *pluginPtr;
-        CARLA_SAFE_ASSERT_RETURN(plugin.get() != nullptr && plugin->isEnabled(), 0);
+        if (plugin.get() == nullptr || ! plugin->isEnabled())
+            return 0;
 
         CarlaEngineJack* const engine((CarlaEngineJack*)plugin->getEngine());
         CARLA_SAFE_ASSERT_RETURN(engine != nullptr, 0);
@@ -4481,7 +4478,8 @@ private:
         CARLA_SAFE_ASSERT_RETURN(pluginPtr != nullptr, 0);
 
         CarlaPluginPtr plugin = *pluginPtr;
-        CARLA_SAFE_ASSERT_RETURN(plugin.get() != nullptr && plugin->isEnabled(), 0);
+        if (plugin.get() == nullptr || ! plugin->isEnabled())
+            return 0;
 
         CarlaEngineJackClient* const engineClient((CarlaEngineJackClient*)plugin->getEngineClient());
         CARLA_SAFE_ASSERT_RETURN(engineClient != nullptr, 0);
@@ -4498,7 +4496,8 @@ private:
         CARLA_SAFE_ASSERT_RETURN(pluginPtr != nullptr, 0);
 
         CarlaPluginPtr plugin = *pluginPtr;
-        CARLA_SAFE_ASSERT_RETURN(plugin.get() != nullptr && plugin->isEnabled(), 0);
+        if (plugin.get() == nullptr || ! plugin->isEnabled())
+            return 0;
 
         CarlaEngineJackClient* const engineClient((CarlaEngineJackClient*)plugin->getEngineClient());
         CARLA_SAFE_ASSERT_RETURN(engineClient != nullptr, 0);

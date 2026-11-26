@@ -281,6 +281,7 @@ struct CarlaEngine::ProtectedData {
     double   sampleRate;
 
     bool aboutToClose;    // don't re-activate runner if true
+    bool addingStandaloneNode; // true while initializing a PLUGIN_OPTION_STANDALONE_NODE plugin
     int  isIdling;        // don't allow any operations while idling
     uint curPluginCount;  // number of plugins loaded (0...max)
     uint maxPluginNumber; // number of plugins allowed (0, 16, 99 or 255)

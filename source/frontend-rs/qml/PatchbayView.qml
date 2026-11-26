@@ -19,6 +19,10 @@ ColumnLayout {
     readonly property real canvasViewportW: pbCanvas.width
     readonly property real canvasViewportH: pbCanvas.height
 
+    onPanXChanged: if (pbCanvas) pbCanvas.requestPaint()
+    onPanYChanged: if (pbCanvas) pbCanvas.requestPaint()
+    onZoomChanged: if (pbCanvas) pbCanvas.requestPaint()
+
     // Interactive drag states
     property string dragMode: "" // "pan" | "boxes" | "port" | "rubberband" | "zoomrect" | "knife"
     property real dragStartSceneX: 0
@@ -39,6 +43,7 @@ ColumnLayout {
     property var searchResults: []
     property int searchSelectedIdx: 0
 
+    signal openAddPluginAt(real sceneX, real sceneY)
     signal openPluginEdit(int pluginId)
     signal openRenamePlugin(int pluginId, string currentName)
     signal openReplacePlugin(int pluginId)
@@ -785,7 +790,7 @@ ColumnLayout {
                             boxCtxMenu.openForBox(hb);
                             return;
                         }
-                        canvasCtxMenu.popup();
+                        canvasCtxMenu.openAt(sp.x, sp.y);
                         return;
                     }
 
@@ -1124,6 +1129,21 @@ ColumnLayout {
 
     Controls.Menu {
         id: canvasCtxMenu
+        property real targetSceneX: 0
+        property real targetSceneY: 0
+        function openAt(sx, sy) {
+            targetSceneX = sx;
+            targetSceneY = sy;
+            popup();
+        }
+
+        Controls.MenuItem {
+            text: qsTr("Add Plugin…")
+            icon.name: "list-add"
+            enabled: root.controller.engine_running
+            onTriggered: root.openAddPluginAt(canvasCtxMenu.targetSceneX, canvasCtxMenu.targetSceneY)
+        }
+        Controls.MenuSeparator {}
         Controls.MenuItem {
             text: qsTr("Arrange")
             icon.name: "view-sort-ascending"
@@ -1142,7 +1162,12 @@ ColumnLayout {
     Controls.Menu {
         id: boxCtxMenu
         property var targetBox: null
-        function openForBox(b) { targetBox = b; popup(); }
+        property bool targetPluginActive: true
+        function openForBox(b) {
+            targetBox = b;
+            targetPluginActive = (b && b.plugin_id >= 0) ? root.controller.is_plugin_active(b.plugin_id) : false;
+            popup();
+        }
 
         Controls.MenuItem {
             text: (boxCtxMenu.targetBox && boxCtxMenu.targetBox.split) ? qsTr("Join") : qsTr("Split")
@@ -1168,6 +1193,13 @@ ColumnLayout {
             onTriggered: root.controller.patchbay_disconnect_group(boxCtxMenu.targetBox.group_id)
         }
         Controls.MenuSeparator { visible: boxCtxMenu.targetBox && boxCtxMenu.targetBox.plugin_id >= 0 }
+        Controls.MenuItem {
+            visible: boxCtxMenu.targetBox && boxCtxMenu.targetBox.plugin_id >= 0
+            text: qsTr("Active")
+            checkable: true
+            checked: boxCtxMenu.targetPluginActive
+            onTriggered: root.controller.set_plugin_active(boxCtxMenu.targetBox.plugin_id, !boxCtxMenu.targetPluginActive)
+        }
         Controls.MenuItem {
             visible: boxCtxMenu.targetBox && boxCtxMenu.targetBox.plugin_id >= 0
             text: qsTr("Edit Parameters")

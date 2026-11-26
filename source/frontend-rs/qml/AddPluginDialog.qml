@@ -9,6 +9,9 @@ Controls.ApplicationWindow {
     id: win
     required property var controller
     property int replacePluginId: -1
+    property bool hasTargetPatchbayPos: false
+    property real targetPatchbayX: 0
+    property real targetPatchbayY: 0
 
     property string searchText: ""
     property bool favoritesOnly: false
@@ -40,7 +43,26 @@ Controls.ApplicationWindow {
 
     function openForAdd() {
         replacePluginId = -1;
-        runQuery();
+        hasTargetPatchbayPos = false;
+        selectedKey = "";
+        selectedPlugin = null;
+        runQuery(false);
+        pluginList.contentY = 0;
+        show();
+        raise();
+        requestActivate();
+        searchField.forceActiveFocus();
+    }
+
+    function openForAddAt(sx, sy) {
+        replacePluginId = -1;
+        hasTargetPatchbayPos = true;
+        targetPatchbayX = sx;
+        targetPatchbayY = sy;
+        selectedKey = "";
+        selectedPlugin = null;
+        runQuery(false);
+        pluginList.contentY = 0;
         show();
         raise();
         requestActivate();
@@ -49,7 +71,11 @@ Controls.ApplicationWindow {
 
     function openForReplace(pid) {
         replacePluginId = pid;
-        runQuery();
+        hasTargetPatchbayPos = false;
+        selectedKey = "";
+        selectedPlugin = null;
+        runQuery(false);
+        pluginList.contentY = 0;
         show();
         raise();
         requestActivate();
@@ -75,7 +101,8 @@ Controls.ApplicationWindow {
         pluginList.positionViewAtIndex(idx, ListView.Contain);
     }
 
-    function runQuery() {
+    function runQuery(preserveScroll) {
+        var savedY = preserveScroll ? pluginList.contentY : 0;
         try {
             var raw = controller.query_plugins_json(
                 searchText, favoritesOnly, categoryFilter, formatsMask, typesMask, sortCol, sortAsc
@@ -92,6 +119,10 @@ Controls.ApplicationWindow {
                 }
             }
             pluginList.currentIndex = foundIdx;
+            if (preserveScroll) {
+                var maxY = Math.max(0, pluginList.contentHeight - pluginList.height);
+                pluginList.contentY = Math.max(0, Math.min(savedY, maxY));
+            }
         } catch (e) {}
     }
 
@@ -106,7 +137,16 @@ Controls.ApplicationWindow {
 
     function commitSelection(plugin) {
         if (!plugin) return;
-        controller.add_plugin_by_key_with_bridge(plugin.key, replacePluginId, bridgeModeCombo.currentIndex);
+        var usePos = hasTargetPatchbayPos && replacePluginId < 0;
+        hasTargetPatchbayPos = false;
+        controller.add_plugin_by_key_at(
+            plugin.key,
+            replacePluginId,
+            bridgeModeCombo.currentIndex,
+            usePos,
+            targetPatchbayX,
+            targetPatchbayY
+        );
         close();
     }
 
@@ -126,7 +166,7 @@ Controls.ApplicationWindow {
     Connections {
         target: win.controller
         function onDiscovery_revisionChanged() {
-            if (win.visible) win.runQuery();
+            if (win.visible) win.runQuery(true);
         }
     }
 
@@ -434,6 +474,8 @@ Controls.ApplicationWindow {
                     model: win.queryResult.items || []
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    highlightFollowsCurrentItem: false
+                    highlightMoveDuration: 0
                     focus: true
 
                     Controls.ScrollBar.vertical: Controls.ScrollBar {
@@ -535,7 +577,7 @@ Controls.ApplicationWindow {
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
                                         win.controller.toggle_favorite(pluginRow.modelData.key);
-                                        win.runQuery();
+                                        win.runQuery(true);
                                     }
                                 }
                             }
